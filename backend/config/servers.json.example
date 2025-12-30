@@ -1,0 +1,32 @@
+{
+  "servers": [
+    
+    {
+      "name": "test-Server",
+      "group": "test",
+      "host": "8.8.8.8",
+      "port": 22,
+      "username": "administrator",
+      "password": "ThisisApassword",
+      "privateKey": "/app/config/key.pem",
+      "serviceNames": [
+        "IConduct Agent Notification",
+        "IConduct Api Gateway",
+        "IConduct Cloud Agent 01",
+        "IConduct Cloud Agent 02",
+        "IConduct Cloud Agent BI WWW9",
+        "IConduct Connector Repository",
+        "IConduct Monitor",
+        "IConduct Nats Server",
+        "IConduct Nats-Streamer",
+        "IConductDataBus",
+        "IConduct-LicenseService",
+        "IConductMetadataAPI",
+        "IConduct-scheduler-storage",
+	"IConductService01",
+	"IConductService01"
+      ],
+      "dllPath": "D:\\IConduct\\IConduct.ConnectorRepository\\Connectors"
+    }
+  ]
+}
