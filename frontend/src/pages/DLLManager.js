@@ -7,7 +7,7 @@ import LoadingSpinner from '../components/LoadingSpinner';
 
 const DLLManager = () => {
   const [allDLLs, setAllDLLs] = useState([]);
-  const [expandedServer, setExpandedServer] = useState(null); // Only ONE server expanded (accordion)
+  const [expandedServer, setExpandedServer] = useState(null);
   const [expandedFolders, setExpandedFolders] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -41,7 +41,6 @@ const DLLManager = () => {
     fetchDLLs();
   }, []);
 
-  // Accordion behavior: only one server expanded at a time
   const toggleServerExpansion = (serverName) => {
     if (expandedServer === serverName) {
       setExpandedServer(null);
@@ -168,10 +167,27 @@ const DLLManager = () => {
     return 0;
   };
 
-  const filteredServers = allDLLs.filter(server =>
-    server.serverName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    server.serverGroup.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  // NEW: Filter servers based on DLL folder names, not server names
+  const filteredServers = allDLLs.map(server => {
+    const folders = getServerFolders(server);
+    
+    // If no search term, return server with all folders
+    if (!searchTerm.trim()) {
+      return { ...server, folders };
+    }
+    
+    // Filter folders by search term
+    const matchingFolders = folders.filter(folder =>
+      folder.folderName.toLowerCase().includes(searchTerm.toLowerCase())
+    );
+    
+    // Only include server if it has matching folders
+    if (matchingFolders.length > 0) {
+      return { ...server, folders: matchingFolders };
+    }
+    
+    return null;
+  }).filter(server => server !== null);
 
   const availableServers = allDLLs.filter(s => s.serverName !== compareSourceServer);
 
@@ -202,17 +218,22 @@ const DLLManager = () => {
         </button>
       </div>
 
-      {/* Search */}
+      {/* Search - NOW searches DLL folder names */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
         <input
           type="text"
-          placeholder="Search by server name or group..."
+          placeholder="Search DLL folders by name..."
           value={searchTerm}
           onChange={(e) => setSearchTerm(e.target.value)}
           className="w-full bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-white px-4 py-3 rounded-lg 
                    border border-gray-300 dark:border-gray-600 focus:outline-none focus:border-orange-500 
                    focus:ring-2 focus:ring-orange-200 dark:focus:ring-orange-800 transition-all"
         />
+        {searchTerm && (
+          <p className="text-gray-500 dark:text-gray-400 text-sm mt-2">
+            Showing servers with DLL folders matching "{searchTerm}"
+          </p>
+        )}
       </div>
 
       {/* Error Display */}
@@ -226,11 +247,12 @@ const DLLManager = () => {
       <div className="space-y-3">
         {filteredServers.length === 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg p-8 border border-gray-200 dark:border-gray-700 shadow-sm text-center transition-colors duration-200">
-            <p className="text-gray-600 dark:text-gray-400">No servers found</p>
+            <p className="text-gray-600 dark:text-gray-400">
+              {searchTerm ? `No DLL folders found matching "${searchTerm}"` : 'No servers found'}
+            </p>
           </div>
         ) : (
           filteredServers.map((serverData) => {
-            const folders = getServerFolders(serverData);
             const isExpanded = expandedServer === serverData.serverName;
 
             return (
@@ -245,7 +267,7 @@ const DLLManager = () => {
                     <div className="text-left">
                       <h3 className="text-xl font-bold text-gray-900 dark:text-white">{serverData.serverGroup}</h3>
                       <p className="text-sm text-gray-600 dark:text-gray-400">
-                        {serverData.serverName} • {folders.length} folders • {serverData.dlls?.length || 0} DLLs
+                        {serverData.serverName} • {serverData.folders.length} folders{searchTerm && ' (filtered)'}
                       </p>
                     </div>
                   </div>
@@ -261,11 +283,11 @@ const DLLManager = () => {
                 {/* Folders Grid - Shown when expanded */}
                 {isExpanded && (
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-6 transition-colors duration-200">
-                    {folders.length === 0 ? (
+                    {serverData.folders.length === 0 ? (
                       <p className="text-gray-600 dark:text-gray-400 text-center py-4">No DLL folders found</p>
                     ) : (
                       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-4">
-                        {folders.map((folder) => {
+                        {serverData.folders.map((folder) => {
                           const folderKey = `${serverData.serverName}-${folder.folderName}`;
                           const isFolderExpanded = expandedFolders[folderKey];
 

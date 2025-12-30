@@ -1,7 +1,7 @@
 // Full path: frontend/src/components/ServiceCard.js
 
 import React from 'react';
-import { FaCircle, FaMicrochip, FaMemory } from 'react-icons/fa';
+import { FaCircle } from 'react-icons/fa';
 
 const ServiceCard = ({ service }) => {
   const isRunning = service.Status === 'Running';
@@ -25,7 +25,7 @@ const ServiceCard = ({ service }) => {
       </div>
 
       {/* Status Badge */}
-      <div className="mb-3">
+      <div className="mb-2">
         <span className={`inline-flex items-center space-x-1 px-3 py-1 rounded-full text-xs font-medium ${
           isRunning
             ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
@@ -34,31 +34,6 @@ const ServiceCard = ({ service }) => {
           <FaCircle className="text-[8px]" />
           <span>{service.Status}</span>
         </span>
-      </div>
-
-      {/* Metrics - CPU and RAM with labels */}
-      <div className="space-y-2 pt-3 border-t border-gray-200 dark:border-gray-700">
-        {/* CPU */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <FaMicrochip className="text-blue-500 text-sm" />
-            <span className="text-gray-600 dark:text-gray-400 text-xs font-medium">CPU</span>
-          </div>
-          <span className="text-gray-900 dark:text-white text-sm font-semibold">
-            {service.CPU ? `${service.CPU}%` : '0%'}
-          </span>
-        </div>
-
-        {/* RAM/Memory */}
-        <div className="flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <FaMemory className="text-purple-500 text-sm" />
-            <span className="text-gray-600 dark:text-gray-400 text-xs font-medium">Memory</span>
-          </div>
-          <span className="text-gray-900 dark:text-white text-sm font-semibold">
-            {service.RAM ? `${service.RAM} MB` : '0 MB'}
-          </span>
-        </div>
       </div>
     </div>
   );
