@@ -16,7 +16,7 @@ class SSHService {
       this.config = JSON.parse(configData);
     } catch (error) {
       console.error('Error loading server configuration:', error);
-      this.config = { servers: [], serviceNames: [], dllPath: '' };
+      this.config = { servers: [] };
     }
   }
 
@@ -35,7 +35,6 @@ class SSHService {
         
         // Escape the command for cmd.exe + PowerShell
         // Use scriptblock with & to ensure it executes as a script
-        // Inside the scriptblock, we can use single quotes which are literal in PowerShell
         const escapedCommand = command
           .replace(/\\/g, '\\\\')  // Escape backslashes
           .replace(/"/g, '\\"');    // Escape double quotes for cmd.exe
@@ -96,24 +95,12 @@ class SSHService {
   }
 
   /**
-   * Get service names
-   */
-  getServiceNames() {
-    return this.config.serviceNames;
-  }
-
-  /**
-   * Get DLL path
-   */
-  getDllPath() {
-    return this.config.dllPath;
-  }
-
-  /**
    * Get server groups
    */
   getServerGroups() {
-    return ['V6', 'TEST3', 'WWW9', 'WWW10', 'WWW11', 'WWW12', 'GOV'];
+    // Extract unique groups from servers
+    const groups = [...new Set(this.config.servers.map(s => s.group))];
+    return groups.sort();
   }
 }
 

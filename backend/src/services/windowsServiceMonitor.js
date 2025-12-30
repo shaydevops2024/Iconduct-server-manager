@@ -8,10 +8,9 @@ class WindowsServiceMonitor {
    */
   async getAllServices() {
     const servers = sshService.getAllServers();
-    const serviceNames = sshService.getServiceNames();
     
     const results = await Promise.allSettled(
-      servers.map(server => this.getServerServices(server, serviceNames))
+      servers.map(server => this.getServerServices(server))
     );
 
     // Group by server group
@@ -37,10 +36,9 @@ class WindowsServiceMonitor {
    */
   async getServicesByGroup(group) {
     const servers = sshService.getServersByGroup(group);
-    const serviceNames = sshService.getServiceNames();
     
     const results = await Promise.allSettled(
-      servers.map(server => this.getServerServices(server, serviceNames))
+      servers.map(server => this.getServerServices(server))
     );
 
     return results
@@ -52,51 +50,83 @@ class WindowsServiceMonitor {
   }
 
   /**
-   * Get services from a single server - SUPER SIMPLIFIED
+   * Get services from a single server - ONLY shows services in serviceNames array
    */
-  async getServerServices(serverConfig, serviceNames) {
+  async getServerServices(serverConfig) {
     try {
       console.log(`Fetching services from ${serverConfig.name}...`);
       
-      // Get IConduct services and convert Status to string
+      // Get service names from server config (per-server)
+      const configuredServiceNames = serverConfig.serviceNames || [];
+      
+      if (configuredServiceNames.length === 0) {
+        console.log(`No service names configured for ${serverConfig.name}`);
+        return [];
+      }
+      
+      console.log(`Looking for ${configuredServiceNames.length} configured services on ${serverConfig.name}`);
+      
+      // Get ALL IConduct services and convert Status to string
       const command = `Get-Service | Where-Object {$_.Name -like '*IConduct*' -or $_.DisplayName -like '*IConduct*'} | ForEach-Object {[PSCustomObject]@{Name=$_.Name;DisplayName=$_.DisplayName;Status=$_.Status.ToString()}} | ConvertTo-Json`;
 
       const output = await sshService.executeCommand(serverConfig, command);
       
-      console.log(`Raw output from ${serverConfig.name} (length: ${output.length}):`);
-      console.log(output.substring(0, 500));
+      console.log(`Raw output from ${serverConfig.name} (length: ${output.length})`);
       
       // Parse JSON output
-      let services = [];
+      let allServices = [];
       if (output && output.trim().length > 0) {
         try {
           const cleanOutput = output.trim();
           
-          // Handle empty results
+          // Handle empty array
           if (cleanOutput === '[]' || cleanOutput === '') {
             console.log(`No services found on ${serverConfig.name}`);
             return [];
           }
           
           const parsed = JSON.parse(cleanOutput);
-          const rawServices = Array.isArray(parsed) ? parsed : [parsed];
+          allServices = Array.isArray(parsed) ? parsed : [parsed];
           
-          // Add CPU and RAM as 0 for now (we'll enhance this later)
-          services = rawServices.map(svc => ({
-            Name: svc.Name,
-            DisplayName: svc.DisplayName,
-            Status: svc.Status,
-            CPU: 0,
-            RAM: 0
-          }));
-          
-          console.log(`Successfully parsed ${services.length} services from ${serverConfig.name}`);
+          console.log(`Found ${allServices.length} total IConduct services on ${serverConfig.name}`);
         } catch (e) {
           console.error(`Error parsing JSON from ${serverConfig.name}:`, e.message);
-          console.error(`Output was: ${output.substring(0, 1000)}`);
+          return [];
         }
       } else {
         console.log(`Empty output from ${serverConfig.name}`);
+        return [];
+      }
+
+      // FILTER: Only include services that are in the configured serviceNames list
+      const filteredServices = allServices.filter(service => {
+        // Check if service Name or DisplayName matches any configured service name
+        const nameMatch = configuredServiceNames.some(configName => 
+          service.Name.toLowerCase() === configName.toLowerCase() ||
+          service.DisplayName.toLowerCase() === configName.toLowerCase()
+        );
+        return nameMatch;
+      });
+
+      console.log(`Filtered to ${filteredServices.length} configured services (from ${allServices.length} total)`);
+      
+      // Add CPU and RAM as 0 for now (can be enhanced later)
+      const services = filteredServices.map(svc => ({
+        Name: svc.Name,
+        DisplayName: svc.DisplayName,
+        Status: svc.Status,
+        CPU: 0,
+        RAM: 0
+      }));
+
+      // Log which services were found vs not found
+      const foundNames = services.map(s => s.DisplayName);
+      const notFound = configuredServiceNames.filter(name => 
+        !foundNames.some(found => found.toLowerCase() === name.toLowerCase())
+      );
+      
+      if (notFound.length > 0) {
+        console.log(`⚠️  Services not found on ${serverConfig.name}: ${notFound.join(', ')}`);
       }
 
       return services;
