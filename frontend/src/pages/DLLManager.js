@@ -2,17 +2,24 @@
 
 import React, { useState, useEffect } from 'react';
 import { dllAPI } from '../services/api';
-import { FaFolder, FaSync, FaChevronDown, FaChevronUp, FaServer } from 'react-icons/fa';
+import { FaFolder, FaSync, FaChevronDown, FaChevronUp, FaServer, FaBalanceScale, FaTimes } from 'react-icons/fa';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const DLLManager = () => {
   const [allDLLs, setAllDLLs] = useState([]);
-  const [expandedServers, setExpandedServers] = useState({});
+  const [expandedServer, setExpandedServer] = useState(null); // Only ONE server expanded (accordion)
   const [expandedFolders, setExpandedFolders] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [searchTerm, setSearchTerm] = useState('');
   const [lastUpdate, setLastUpdate] = useState(null);
+  
+  // Comparison modal state
+  const [showCompareModal, setShowCompareModal] = useState(false);
+  const [compareSourceServer, setCompareSourceServer] = useState('');
+  const [compareFolderName, setCompareFolderName] = useState('');
+  const [compareTargetServer, setCompareTargetServer] = useState('');
+  const [comparisonResult, setComparisonResult] = useState(null);
 
   const fetchDLLs = async () => {
     setLoading(true);
@@ -34,11 +41,13 @@ const DLLManager = () => {
     fetchDLLs();
   }, []);
 
+  // Accordion behavior: only one server expanded at a time
   const toggleServerExpansion = (serverName) => {
-    setExpandedServers(prev => ({
-      ...prev,
-      [serverName]: !prev[serverName]
-    }));
+    if (expandedServer === serverName) {
+      setExpandedServer(null);
+    } else {
+      setExpandedServer(serverName);
+    }
   };
 
   const toggleFolderExpansion = (serverName, folderName) => {
@@ -49,7 +58,69 @@ const DLLManager = () => {
     }));
   };
 
-  // Group DLLs by server and folder
+  const openCompareModal = (serverName, folderName) => {
+    setCompareSourceServer(serverName);
+    setCompareFolderName(folderName);
+    setCompareTargetServer('');
+    setComparisonResult(null);
+    setShowCompareModal(true);
+  };
+
+  const closeCompareModal = () => {
+    setShowCompareModal(false);
+    setCompareSourceServer('');
+    setCompareFolderName('');
+    setCompareTargetServer('');
+    setComparisonResult(null);
+  };
+
+  const performComparison = () => {
+    if (!compareTargetServer) {
+      return;
+    }
+
+    const sourceServer = allDLLs.find(s => s.serverName === compareSourceServer);
+    const targetServer = allDLLs.find(s => s.serverName === compareTargetServer);
+
+    if (!sourceServer || !targetServer) {
+      setComparisonResult({
+        error: 'Server data not found'
+      });
+      return;
+    }
+
+    const sourceFolders = getServerFolders(sourceServer);
+    const targetFolders = getServerFolders(targetServer);
+
+    const sourceFolder = sourceFolders.find(f => f.folderName === compareFolderName);
+    const targetFolder = targetFolders.find(f => f.folderName === compareFolderName);
+
+    if (!sourceFolder) {
+      setComparisonResult({
+        error: `Folder "${compareFolderName}" not found on ${compareSourceServer}`
+      });
+      return;
+    }
+
+    if (!targetFolder) {
+      setComparisonResult({
+        match: false,
+        sourceVersion: sourceFolder.latestVersion,
+        targetVersion: 'Not Found',
+        folderNotFound: true
+      });
+      return;
+    }
+
+    const match = sourceFolder.latestVersion === targetFolder.latestVersion;
+
+    setComparisonResult({
+      match,
+      sourceVersion: sourceFolder.latestVersion,
+      targetVersion: targetFolder.latestVersion
+    });
+  };
+
   const getServerFolders = (serverData) => {
     const folderMap = new Map();
     
@@ -65,7 +136,6 @@ const DLLManager = () => {
       });
     }
 
-    // Convert to array and add version info
     return Array.from(folderMap.values()).map(folder => {
       const versions = folder.dlls
         .map(dll => dll.Version)
@@ -103,12 +173,11 @@ const DLLManager = () => {
     server.serverGroup.toLowerCase().includes(searchTerm.toLowerCase())
   );
 
+  const availableServers = allDLLs.filter(s => s.serverName !== compareSourceServer);
+
   if (loading) {
     return <LoadingSpinner message="Loading DLL information..." />;
   }
-
-  const totalFolders = allDLLs.reduce((sum, s) => sum + getServerFolders(s).length, 0);
-  const totalDLLs = allDLLs.reduce((sum, s) => sum + (s.dlls?.length || 0), 0);
 
   return (
     <div className="space-y-6">
@@ -133,39 +202,6 @@ const DLLManager = () => {
         </button>
       </div>
 
-      {/* Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">Total Servers</p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">{allDLLs.length}</p>
-            </div>
-            <FaServer className="text-orange-500 text-4xl" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">Total Folders</p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">{totalFolders}</p>
-            </div>
-            <FaFolder className="text-orange-500 text-4xl" />
-          </div>
-        </div>
-
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
-          <div className="flex items-center justify-between">
-            <div>
-              <p className="text-gray-600 dark:text-gray-400 text-sm mb-1">Total DLLs</p>
-              <p className="text-3xl font-bold text-gray-900 dark:text-white">{totalDLLs}</p>
-            </div>
-            <FaSync className="text-orange-500 text-4xl" />
-          </div>
-        </div>
-      </div>
-
       {/* Search */}
       <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
         <input
@@ -186,7 +222,7 @@ const DLLManager = () => {
         </div>
       )}
 
-      {/* Server Sections */}
+      {/* Server Sections (Accordion) */}
       <div className="space-y-3">
         {filteredServers.length === 0 ? (
           <div className="bg-white dark:bg-gray-800 rounded-lg p-8 border border-gray-200 dark:border-gray-700 shadow-sm text-center transition-colors duration-200">
@@ -195,7 +231,7 @@ const DLLManager = () => {
         ) : (
           filteredServers.map((serverData) => {
             const folders = getServerFolders(serverData);
-            const isExpanded = expandedServers[serverData.serverName];
+            const isExpanded = expandedServer === serverData.serverName;
 
             return (
               <div key={serverData.serverName} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden transition-colors duration-200">
@@ -261,6 +297,16 @@ const DLLManager = () => {
                                   </p>
                                 </div>
 
+                                {/* Compare Button */}
+                                <button
+                                  onClick={() => openCompareModal(serverData.serverName, folder.folderName)}
+                                  className="w-full flex items-center justify-center space-x-2 bg-blue-500 hover:bg-blue-600 
+                                           text-white px-3 py-2 rounded-lg transition-all mb-3"
+                                >
+                                  <FaBalanceScale className="text-sm" />
+                                  <span className="text-sm font-medium">Compare DLL</span>
+                                </button>
+
                                 {/* Previous Versions Dropdown */}
                                 {folder.previousVersions.length > 0 && (
                                   <div className="mt-3">
@@ -280,7 +326,6 @@ const DLLManager = () => {
                                       )}
                                     </button>
 
-                                    {/* Expanded Previous Versions */}
                                     {isFolderExpanded && (
                                       <div className="mt-2 space-y-1 max-h-48 overflow-y-auto">
                                         {folder.previousVersions.map((version, idx) => (
@@ -296,7 +341,6 @@ const DLLManager = () => {
                                   </div>
                                 )}
 
-                                {/* No Previous Versions */}
                                 {folder.previousVersions.length === 0 && (
                                   <p className="text-gray-500 dark:text-gray-500 text-xs text-center py-2">
                                     No previous versions
@@ -315,6 +359,143 @@ const DLLManager = () => {
           })
         )}
       </div>
+
+      {/* Compare Modal */}
+      {showCompareModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-lg shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between p-6 border-b border-gray-200 dark:border-gray-700">
+              <div className="flex items-center space-x-3">
+                <FaBalanceScale className="text-orange-500 text-2xl" />
+                <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Compare DLL Versions</h3>
+              </div>
+              <button
+                onClick={closeCompareModal}
+                className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
+              >
+                <FaTimes className="text-2xl" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-6">
+              <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-700 rounded-lg p-4">
+                <p className="text-sm text-gray-600 dark:text-gray-400 mb-1">Comparing from:</p>
+                <p className="text-lg font-bold text-gray-900 dark:text-white">{compareSourceServer}</p>
+                <p className="text-md text-orange-600 dark:text-orange-400 font-semibold mt-1">
+                  Folder: {compareFolderName}
+                </p>
+              </div>
+
+              {!comparisonResult && (
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Compare with:
+                  </label>
+                  <select
+                    value={compareTargetServer}
+                    onChange={(e) => setCompareTargetServer(e.target.value)}
+                    className="w-full bg-white dark:bg-gray-700 border border-gray-300 dark:border-gray-600 rounded-lg px-4 py-3
+                             text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-orange-500"
+                  >
+                    <option value="">Select a server...</option>
+                    {availableServers.map(server => (
+                      <option key={server.serverName} value={server.serverName}>
+                        {server.serverGroup} ({server.serverName})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              )}
+
+              {comparisonResult && (
+                <div className={`rounded-lg p-6 border-2 ${
+                  comparisonResult.error 
+                    ? 'bg-red-50 dark:bg-red-900/20 border-red-300 dark:border-red-700'
+                    : comparisonResult.match 
+                      ? 'bg-green-50 dark:bg-green-900/20 border-green-300 dark:border-green-700'
+                      : 'bg-yellow-50 dark:bg-yellow-900/20 border-yellow-300 dark:border-yellow-700'
+                }`}>
+                  {comparisonResult.error ? (
+                    <p className="text-red-600 dark:text-red-400 font-medium">{comparisonResult.error}</p>
+                  ) : comparisonResult.folderNotFound ? (
+                    <div className="space-y-3">
+                      <p className="text-yellow-700 dark:text-yellow-300 font-semibold text-lg">
+                        Folder not found on target server
+                      </p>
+                      <div className="bg-white dark:bg-gray-800 rounded p-4 space-y-2">
+                        <p className="text-gray-900 dark:text-white">
+                          On <span className="font-bold">{compareSourceServer}</span>, the latest version of DLL <span className="font-bold text-orange-600 dark:text-orange-400">{compareFolderName}</span> is: <span className="font-bold text-lg">{comparisonResult.sourceVersion}</span>
+                        </p>
+                        <p className="text-gray-900 dark:text-white">
+                          On <span className="font-bold">{compareTargetServer}</span>, the folder <span className="font-bold text-orange-600 dark:text-orange-400">{compareFolderName}</span> was: <span className="font-bold text-red-600">Not Found</span>
+                        </p>
+                      </div>
+                    </div>
+                  ) : comparisonResult.match ? (
+                    <div className="space-y-3">
+                      <p className="text-green-700 dark:text-green-300 font-semibold text-lg">
+                        ✓ Versions Match!
+                      </p>
+                      <div className="bg-white dark:bg-gray-800 rounded p-4">
+                        <p className="text-gray-900 dark:text-white">
+                          Both on server <span className="font-bold">{compareSourceServer}</span> and <span className="font-bold">{compareTargetServer}</span>, the latest DLL is:
+                        </p>
+                        <p className="text-3xl font-bold text-green-600 dark:text-green-400 mt-2">
+                          {comparisonResult.sourceVersion}
+                        </p>
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="space-y-3">
+                      <p className="text-yellow-700 dark:text-yellow-300 font-semibold text-lg">
+                        ⚠ Versions Differ
+                      </p>
+                      <div className="bg-white dark:bg-gray-800 rounded p-4 space-y-3">
+                        <p className="text-gray-900 dark:text-white">
+                          On <span className="font-bold">{compareSourceServer}</span>, the latest version of DLL <span className="font-bold text-orange-600 dark:text-orange-400">{compareFolderName}</span> is: <span className="font-bold text-lg text-blue-600 dark:text-blue-400">{comparisonResult.sourceVersion}</span>
+                        </p>
+                        <div className="h-px bg-gray-300 dark:bg-gray-600"></div>
+                        <p className="text-gray-900 dark:text-white">
+                          On <span className="font-bold">{compareTargetServer}</span>, the latest version of DLL <span className="font-bold text-orange-600 dark:text-orange-400">{compareFolderName}</span> is: <span className="font-bold text-lg text-purple-600 dark:text-purple-400">{comparisonResult.targetVersion}</span>
+                        </p>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              <div className="flex justify-end space-x-3">
+                {!comparisonResult ? (
+                  <>
+                    <button
+                      onClick={closeCompareModal}
+                      className="px-6 py-2 border border-gray-300 dark:border-gray-600 rounded-lg text-gray-700 dark:text-gray-300
+                               hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    >
+                      Cancel
+                    </button>
+                    <button
+                      onClick={performComparison}
+                      disabled={!compareTargetServer}
+                      className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors
+                               disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      Compare
+                    </button>
+                  </>
+                ) : (
+                  <button
+                    onClick={closeCompareModal}
+                    className="px-6 py-2 bg-orange-500 text-white rounded-lg hover:bg-orange-600 transition-colors"
+                  >
+                    Close
+                  </button>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { servicesAPI } from '../services/api';
-import { FaServer, FaCircle, FaSync, FaChevronDown, FaChevronUp } from 'react-icons/fa';
+import { FaServer, FaCircle, FaSync, FaChevronDown, FaChevronUp, FaMicrochip, FaMemory } from 'react-icons/fa';
 import ServiceCard from '../components/ServiceCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Dashboard = () => {
   const [services, setServices] = useState({});
   const [groups, setGroups] = useState([]);
-  const [expandedServers, setExpandedServers] = useState({});
+  const [expandedServer, setExpandedServer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [lastUpdate, setLastUpdate] = useState(null);
@@ -35,16 +35,16 @@ const Dashboard = () => {
   useEffect(() => {
     fetchServices();
     
-    // Auto-refresh every 30 seconds
     const interval = setInterval(fetchServices, 30000);
     return () => clearInterval(interval);
   }, []);
 
   const toggleServerExpansion = (serverKey) => {
-    setExpandedServers(prev => ({
-      ...prev,
-      [serverKey]: !prev[serverKey]
-    }));
+    if (expandedServer === serverKey) {
+      setExpandedServer(null);
+    } else {
+      setExpandedServer(serverKey);
+    }
   };
 
   const getServiceStats = () => {
@@ -137,13 +137,12 @@ const Dashboard = () => {
         </div>
       )}
 
-      {/* Services by Group - Collapsible Server Sections */}
+      {/* Services by Group - Accordion */}
       <div className="space-y-3">
         {groups.map(group => (
           <div key={group}>
             {services[group] && services[group].length > 0 ? (
               services[group].map(server => {
-                // Sort services: Running first, then Stopped
                 const sortedServices = server.services ? [...server.services].sort((a, b) => {
                   if (a.Status === 'Running' && b.Status !== 'Running') return -1;
                   if (a.Status !== 'Running' && b.Status === 'Running') return 1;
@@ -151,8 +150,14 @@ const Dashboard = () => {
                 }) : [];
 
                 const serverKey = `${group}-${server.serverName}`;
-                const isExpanded = expandedServers[serverKey];
+                const isExpanded = expandedServer === serverKey;
                 const runningCount = sortedServices.filter(s => s.Status === 'Running').length;
+                
+                // Get system metrics - now with percentages
+                const systemMetrics = server.systemMetrics || {
+                  cpuPercent: 0,
+                  ramPercent: 0
+                };
 
                 return (
                   <div key={serverKey} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden transition-colors duration-200">
@@ -170,9 +175,37 @@ const Dashboard = () => {
                           </p>
                         </div>
                       </div>
-                      <div className="flex items-center space-x-3">
+                      
+                      <div className="flex items-center space-x-6">
+                        {/* System Metrics Box - Now showing percentages */}
+                        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg px-4 py-2 border border-gray-200 dark:border-gray-700">
+                          <div className="flex items-center space-x-4">
+                            {/* CPU Percentage */}
+                            <div className="flex items-center space-x-2">
+                              <FaMicrochip className="text-blue-500 text-sm" />
+                              <div className="text-left">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">CPU</p>
+                                <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                  {systemMetrics.cpuPercent}%
+                                </p>
+                              </div>
+                            </div>
+                            
+                            {/* RAM Percentage */}
+                            <div className="flex items-center space-x-2">
+                              <FaMemory className="text-purple-500 text-sm" />
+                              <div className="text-left">
+                                <p className="text-xs text-gray-500 dark:text-gray-400">RAM</p>
+                                <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                  {systemMetrics.ramPercent}%
+                                </p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
                         {/* Running/Stopped indicators */}
-                        <div className="flex items-center space-x-4 mr-4">
+                        <div className="flex items-center space-x-4">
                           <div className="flex items-center space-x-1">
                             <FaCircle className="text-green-500 text-xs" />
                             <span className="text-green-600 dark:text-green-400 font-medium text-sm">{runningCount}</span>
@@ -182,6 +215,8 @@ const Dashboard = () => {
                             <span className="text-red-600 dark:text-red-400 font-medium text-sm">{sortedServices.length - runningCount}</span>
                           </div>
                         </div>
+                        
+                        {/* Chevron */}
                         {isExpanded ? (
                           <FaChevronUp className="text-gray-400 dark:text-gray-500 text-xl" />
                         ) : (
