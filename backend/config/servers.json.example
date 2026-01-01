@@ -50,7 +50,16 @@
           "privateKey": "/app/config/key.pem",
           "dllPath": "C:\inetpub\wwwroot\IConductUI\ConnectorAssemblyCache"
         }
-      ]
+      ],
+      "dbConnection": {
+        "server": "<DB IP>",
+        "database": "Iconduct",
+        "user": "<user>",
+        "password": "<password>",
+        "options": {
+          "encrypt": true,
+          "trustServerCertificate": true
+        }
     }
   ]
 }
