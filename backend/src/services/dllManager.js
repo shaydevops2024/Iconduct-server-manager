@@ -209,17 +209,117 @@ class DLLManager {
 
 
 
+  async deployToServer(serverConfig, dllName, version, presignedUrl, serverType = 'Backend') {
+
+    const dllPath = serverConfig.dllPath;
+
+    const dllFolder = `${dllPath}\\${dllName}`;
+
+    const versionPath = `${dllFolder}\\${version}`;
+
+    const timestamp = Date.now();
+
+    const zipFileName = `${dllName}_${version}_${timestamp}.zip`;
+
+    const zipPath = `${dllFolder}\\${zipFileName}`;
+
+
+
+    try {
+
+      console.log(`\n   🎯 Deploying to ${serverType}: ${serverConfig.name}`);
+
+      console.log(`   📍 Target: ${versionPath}`);
+
+
+
+      // Ensure folder exists
+
+      const ensureFolderCmd = `if (!(Test-Path '${dllFolder}')) { New-Item -ItemType Directory -Path '${dllFolder}' -Force | Out-Null }`;
+
+      await sshService.executeCommand(serverConfig, ensureFolderCmd);
+
+
+
+      // Download from S3
+
+      const downloadCmd = `Invoke-WebRequest -Uri '${presignedUrl}' -OutFile '${zipPath}' -UseBasicParsing`;
+
+      await sshService.executeCommand(serverConfig, downloadCmd);
+
+      console.log(`   ✅ Downloaded ZIP`);
+
+
+
+      // Remove old version
+
+      const removeOldCmd = `if (Test-Path '${versionPath}') { Remove-Item -Path '${versionPath}' -Recurse -Force }`;
+
+      await sshService.executeCommand(serverConfig, removeOldCmd);
+
+
+
+      // Extract
+
+      const extractCmd = `Expand-Archive -Path '${zipPath}' -DestinationPath '${dllFolder}' -Force`;
+
+      await sshService.executeCommand(serverConfig, extractCmd);
+
+      console.log(`   ✅ Extracted ZIP`);
+
+
+
+      // Cleanup ZIP
+
+      const deleteZipCmd = `Remove-Item -Path '${zipPath}' -Force -ErrorAction SilentlyContinue`;
+
+      await sshService.executeCommand(serverConfig, deleteZipCmd);
+
+
+
+      // Verify
+
+      const verifyCmd = `if (Test-Path '${versionPath}') { (Get-ChildItem -Path '${versionPath}' -File).Count } else { Write-Output "0" }`;
+
+      const fileCount = await sshService.executeCommand(serverConfig, verifyCmd);
+
+      
+
+      if (parseInt(fileCount.trim()) > 0) {
+
+        console.log(`   ✅ Verified: ${fileCount.trim()} files deployed`);
+
+        return { success: true, path: versionPath, fileCount: parseInt(fileCount.trim()) };
+
+      } else {
+
+        throw new Error('No files found after deployment');
+
+      }
+
+    } catch (error) {
+
+      console.log(`   ❌ Failed: ${error.message}`);
+
+      return { success: false, path: versionPath, error: error.message };
+
+    }
+
+  }
+
+
+
   async updateDLL(sourceServerConfig, targetServerConfig, dllName, version) {
 
     console.log(`\n========================================`);
 
-    console.log(`DLL TRANSFER - COMPLETE DEPLOYMENT`);
+    console.log(`DLL TRANSFER - FULL DEPLOYMENT`);
 
     console.log(`========================================`);
 
     console.log(`Source: ${sourceServerConfig.name}`);
 
-    console.log(`Target: ${targetServerConfig.name}`);
+    console.log(`Target: ${targetServerConfig.name} (Backend)`);
 
     console.log(`DLL: ${dllName}`);
 
@@ -258,6 +358,18 @@ class DLLManager {
 
 
     let s3Uploaded = false;
+
+    let presignedUrl = null;
+
+    const deploymentResults = {
+
+      backend: null,
+
+      additionalPaths: [],
+
+      frontendServers: []
+
+    };
 
 
 
@@ -345,123 +457,43 @@ class DLLManager {
 
       });
 
-      const presignedUrl = await getSignedUrl(this.s3Client, getObjectCommand, { expiresIn: 3600 });
+      presignedUrl = await getSignedUrl(this.s3Client, getObjectCommand, { expiresIn: 3600 });
 
-      console.log(`✅ Presigned URL generated\n`);
-
-
-
-      // STEP 6: Download from S3 to target
-
-      console.log(`⬇️  STEP 6: Downloading to ${targetServerConfig.name}...`);
-
-      const ensureFolderCmd = `if (!(Test-Path '${targetDllFolder}')) { New-Item -ItemType Directory -Path '${targetDllFolder}' -Force | Out-Null }`;
-
-      await sshService.executeCommand(targetServerConfig, ensureFolderCmd);
+      console.log(`✅ Presigned URL generated (valid for 1 hour)\n`);
 
 
 
-      const downloadCmd = `Invoke-WebRequest -Uri '${presignedUrl}' -OutFile '${targetZipPath}' -UseBasicParsing`;
+      // STEP 6: Deploy to Backend server
 
-      await sshService.executeCommand(targetServerConfig, downloadCmd);
+      console.log(`========================================`);
 
-      console.log(`✅ Downloaded ZIP to target\n`);
+      console.log(`BACKEND DEPLOYMENT`);
 
-
-
-      // STEP 7: Remove old version folder if exists
-
-      console.log(`📁 STEP 7: Preparing target location...`);
-
-      const removeOldCmd = `if (Test-Path '${targetVersionPath}') { Remove-Item -Path '${targetVersionPath}' -Recurse -Force }`;
-
-      await sshService.executeCommand(targetServerConfig, removeOldCmd);
-
-      console.log(`✅ Old version removed if it existed\n`);
-
-
-
-      // STEP 8: Extract ZIP (this puts the version folder directly into targetDllFolder)
-
-      console.log(`📂 STEP 8: Extracting ZIP on target...`);
-
-      const extractCmd = `Expand-Archive -Path '${targetZipPath}' -DestinationPath '${targetDllFolder}' -Force`;
-
-      await sshService.executeCommand(targetServerConfig, extractCmd);
-
-      console.log(`✅ ZIP extracted - version folder is now at ${targetVersionPath}\n`);
-
-
-
-      // STEP 9: Cleanup ZIP file only
-
-      console.log(`🧹 STEP 9: Cleaning up ZIP files...`);
+      console.log(`========================================`);
 
       
 
-      // Delete the ZIP file on target
+      const backendResult = await this.deployToServer(targetServerConfig, dllName, version, presignedUrl, 'Backend');
 
-      const deleteZipCmd = `Remove-Item -Path '${targetZipPath}' -Force -ErrorAction SilentlyContinue`;
+      deploymentResults.backend = backendResult;
 
-      await sshService.executeCommand(targetServerConfig, deleteZipCmd);
 
-      console.log(`   Deleted: ${zipFileName} on target`);
 
-      
+      if (!backendResult.success) {
 
-      // Delete source ZIP
-
-      await sshService.executeCommand(sourceServerConfig, `Remove-Item -Path '${sourceZipPath}' -Force -ErrorAction SilentlyContinue`);
-
-      console.log(`   Deleted: ${zipFileName} on source`);
-
-      
-
-      // Delete local temp file
-
-      if (fs.existsSync(localTempPath)) {
-
-        fs.unlinkSync(localTempPath);
+        throw new Error(`Backend deployment failed: ${backendResult.error}`);
 
       }
 
-      console.log(`   Deleted local temp file\n`);
 
 
-
-      // STEP 10: Verify primary deployment
-
-      console.log(`🔍 STEP 10: Verifying primary deployment...`);
-
-      const verifyCmd = `if (Test-Path '${targetVersionPath}') { Get-ChildItem -Path '${targetVersionPath}' -File | ForEach-Object { Write-Output "$($_.Name) ($($_.Length) bytes)" } } else { Write-Output "NOT FOUND" }`;
-
-      const verifyResult = await sshService.executeCommand(targetServerConfig, verifyCmd);
-
-      
-
-      if (verifyResult.trim() === 'NOT FOUND' || !verifyResult.trim()) {
-
-        throw new Error(`Deployment failed - version folder not found or empty: ${targetVersionPath}`);
-
-      }
-
-      
-
-      console.log(`✅ Primary deployment verified!\n`);
-
-      console.log(`Files in ${targetVersionPath}:`);
-
-      console.log(verifyResult);
-
-
-
-      // STEP 11: Copy to additional paths (if configured)
+      // STEP 7: Copy to additional paths on Backend
 
       const additionalPaths = targetServerConfig.additionalDllPaths || [];
 
       if (additionalPaths.length > 0) {
 
-        console.log(`\n📋 STEP 11: Copying to ${additionalPaths.length} additional location(s)...`);
+        console.log(`\n📋 STEP 7: Copying to ${additionalPaths.length} additional backend location(s)...`);
 
         
 
@@ -481,15 +513,11 @@ class DLLManager {
 
           try {
 
-            // Ensure the DLL folder exists
-
             const ensureAdditionalFolderCmd = `if (!(Test-Path '${additionalDllFolder}')) { New-Item -ItemType Directory -Path '${additionalDllFolder}' -Force | Out-Null }`;
 
             await sshService.executeCommand(targetServerConfig, ensureAdditionalFolderCmd);
 
             
-
-            // Remove old version if exists
 
             const removeOldAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { Remove-Item -Path '${additionalVersionPath}' -Recurse -Force }`;
 
@@ -497,15 +525,11 @@ class DLLManager {
 
             
 
-            // Copy the version folder
-
             const copyCmd = `Copy-Item -Path '${targetVersionPath}' -Destination '${additionalVersionPath}' -Recurse -Force`;
 
             await sshService.executeCommand(targetServerConfig, copyCmd);
 
             
-
-            // Verify the copy
 
             const verifyAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { (Get-ChildItem -Path '${additionalVersionPath}' -File).Count } else { Write-Output "0" }`;
 
@@ -517,31 +541,83 @@ class DLLManager {
 
               console.log(`   ✅ Copied successfully (${fileCount.trim()} files)`);
 
+              deploymentResults.additionalPaths.push({ path: additionalVersionPath, success: true, fileCount: parseInt(fileCount.trim()) });
+
             } else {
 
               console.log(`   ⚠️  Warning: Copy completed but no files found`);
+
+              deploymentResults.additionalPaths.push({ path: additionalVersionPath, success: false, error: 'No files found' });
 
             }
 
           } catch (error) {
 
-            console.log(`   ❌ Failed to copy to ${additionalVersionPath}: ${error.message}`);
+            console.log(`   ❌ Failed: ${error.message}`);
+
+            deploymentResults.additionalPaths.push({ path: additionalVersionPath, success: false, error: error.message });
 
           }
 
         }
 
+      }
+
+
+
+      // STEP 8: Deploy to Frontend servers
+
+      const frontendServers = targetServerConfig.frontendServers || [];
+
+      if (frontendServers.length > 0) {
+
+        console.log(`\n========================================`);
+
+        console.log(`FRONTEND DEPLOYMENT`);
+
+        console.log(`========================================`);
+
+        console.log(`Deploying to ${frontendServers.length} frontend server(s)...\n`);
+
         
 
-        console.log(`\n✅ Additional paths processed\n`);
+        for (let i = 0; i < frontendServers.length; i++) {
 
-      } else {
+          const feServer = frontendServers[i];
 
-        console.log(`\nℹ️  No additional paths configured for ${targetServerConfig.name}\n`);
+          const feResult = await this.deployToServer(feServer, dllName, version, presignedUrl, 'Frontend');
+
+          deploymentResults.frontendServers.push({
+
+            serverName: feServer.name,
+
+            ...feResult
+
+          });
+
+        }
 
       }
 
 
+
+      // STEP 9: Cleanup
+
+      console.log(`\n🧹 STEP 9: Cleaning up temporary files...`);
+
+      await sshService.executeCommand(sourceServerConfig, `Remove-Item -Path '${sourceZipPath}' -Force -ErrorAction SilentlyContinue`);
+
+      if (fs.existsSync(localTempPath)) {
+
+        fs.unlinkSync(localTempPath);
+
+      }
+
+      console.log(`✅ Cleanup complete\n`);
+
+
+
+      // Final Summary
 
       console.log(`========================================`);
 
@@ -553,15 +629,27 @@ class DLLManager {
 
       console.log(`Version: ${version}`);
 
-      console.log(`Primary Location: ${targetVersionPath}`);
+      console.log(`\nBACKEND:`);
+
+      console.log(`  Main: ${targetVersionPath} ✅`);
 
       if (additionalPaths.length > 0) {
 
-        console.log(`Additional Locations: ${additionalPaths.length}`);
+        console.log(`  Additional: ${deploymentResults.additionalPaths.filter(r => r.success).length}/${additionalPaths.length} ✅`);
 
-        additionalPaths.forEach((p, i) => {
+      }
 
-          console.log(`  ${i + 1}. ${p}\\${dllName}\\${version}`);
+      if (frontendServers.length > 0) {
+
+        const feSuccess = deploymentResults.frontendServers.filter(r => r.success).length;
+
+        console.log(`\nFRONTEND:`);
+
+        console.log(`  Deployed: ${feSuccess}/${frontendServers.length} ✅`);
+
+        deploymentResults.frontendServers.forEach(fe => {
+
+          console.log(`    ${fe.serverName}: ${fe.success ? '✅' : '❌'}`);
 
         });
 
@@ -583,17 +671,7 @@ class DLLManager {
 
         version: version,
 
-        targetPath: targetVersionPath,
-
-        additionalPaths: additionalPaths.map(p => `${p}\\${dllName}\\${version}`),
-
-        deployedFiles: verifyResult.trim().split('\n').filter(line => line.trim()).map(line => {
-
-          const match = line.match(/^(.*?) \((\d+) bytes\)$/);
-
-          return match ? { name: match[1], size: parseInt(match[2]) } : { name: line, size: 0 };
-
-        })
+        deploymentResults: deploymentResults
 
       };
 
@@ -616,8 +694,6 @@ class DLLManager {
         }
 
         await sshService.executeCommand(sourceServerConfig, `Remove-Item -Path '${sourceZipPath}' -Force -ErrorAction SilentlyContinue`).catch(() => {});
-
-        await sshService.executeCommand(targetServerConfig, `Remove-Item -Path '${targetZipPath}' -Force -ErrorAction SilentlyContinue`).catch(() => {});
 
       } catch (cleanupError) {
 
