@@ -7,8 +7,38 @@ import ServiceCard from '../components/ServiceCard';
 import LoadingSpinner from '../components/LoadingSpinner';
 
 const Dashboard = () => {
-  const [services, setServices] = useState({});
-  const [groups, setGroups] = useState([]);
+  // Initialize state with localStorage cache
+  const [services, setServices] = useState(() => {
+    const cached = localStorage.getItem('iconduct-services-data');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        // Only use cache if less than 1 minute old
+        if (Date.now() - parsed.timestamp < 60000) {
+          return parsed.data;
+        }
+      } catch (e) {
+        console.error('Failed to parse cached services:', e);
+      }
+    }
+    return {};
+  });
+
+  const [groups, setGroups] = useState(() => {
+    const cached = localStorage.getItem('iconduct-services-groups');
+    if (cached) {
+      try {
+        const parsed = JSON.parse(cached);
+        if (Date.now() - parsed.timestamp < 60000) {
+          return parsed.data;
+        }
+      } catch (e) {
+        console.error('Failed to parse cached groups:', e);
+      }
+    }
+    return [];
+  });
+
   const [expandedServer, setExpandedServer] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -19,10 +49,26 @@ const Dashboard = () => {
     try {
       setRefreshing(true);
       const response = await servicesAPI.getAll();
-      setServices(response.data.data);
-      setGroups(response.data.groups);
+      const newData = response.data.data;
+      const newGroups = response.data.groups;
+      
+      setServices(newData);
+      setGroups(newGroups);
       setLastUpdate(new Date());
       setError(null);
+      
+      // Cache in localStorage
+      localStorage.setItem('iconduct-services-data', JSON.stringify({
+        data: newData,
+        timestamp: Date.now()
+      }));
+      
+      localStorage.setItem('iconduct-services-groups', JSON.stringify({
+        data: newGroups,
+        timestamp: Date.now()
+      }));
+
+      console.log(response.data.cached ? '📦 Served from backend cache' : '🔄 Fresh data from servers');
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to fetch services');
       console.error('Error fetching services:', err);
@@ -35,8 +81,29 @@ const Dashboard = () => {
   useEffect(() => {
     fetchServices();
     
-    const interval = setInterval(fetchServices, 30000);
-    return () => clearInterval(interval);
+    // Only refresh when tab is visible
+    const handleVisibilityChange = () => {
+      if (!document.hidden) {
+        console.log('👀 Tab visible - refreshing data');
+        fetchServices();
+      }
+    };
+    
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    
+    // Auto-refresh every 30 seconds, but only if tab is visible
+    const interval = setInterval(() => {
+      if (!document.hidden) {
+        fetchServices();
+      } else {
+        console.log('🙈 Tab hidden - skipping refresh');
+      }
+    }, 30000);
+    
+    return () => {
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+    };
   }, []);
 
   const toggleServerExpansion = (serverKey) => {

@@ -52,41 +52,8 @@ class WindowsServiceMonitor {
   }
 
   /**
-   * Get system-level CPU and RAM usage percentages
-   */
-  async getSystemMetrics(serverConfig) {
-    console.log(`  🔍 Getting system metrics...`);
-    
-    let cpuPercent = 0;
-    let ramPercent = 0;
-    
-    // Get CPU percentage
-    try {
-      const cpuCmd = `Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average | Select-Object -ExpandProperty Average`;
-      const cpuOut = await sshService.executeCommand(serverConfig, cpuCmd);
-      cpuPercent = Math.round(parseFloat(cpuOut.trim())) || 0;
-      if (cpuPercent > 100) cpuPercent = 100;
-    } catch (e) {
-      console.log(`  ⚠️  CPU query failed: ${e.message}`);
-    }
-    
-    // Get RAM percentage
-    try {
-      const ramCmd = `$os = Get-WmiObject Win32_OperatingSystem; [math]::Round((1 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize)) * 100)`;
-      const ramOut = await sshService.executeCommand(serverConfig, ramCmd);
-      ramPercent = parseInt(ramOut.trim()) || 0;
-      if (ramPercent > 100) ramPercent = 100;
-    } catch (e) {
-      console.log(`  ⚠️  RAM query failed: ${e.message}`);
-    }
-    
-    console.log(`  ✅ System: CPU ${cpuPercent}%, RAM ${ramPercent}%`);
-    return { cpuPercent, ramPercent };
-  }
-
-  /**
-   * Get services from a single server - STRICT FILTERING
-   * Only returns services that are EXACTLY in the serviceNames list
+   * Get services from a single server - OPTIMIZED VERSION
+   * Combined: Services + CPU + RAM in ONE SSH call (66% faster!)
    */
   async getServerServices(serverConfig) {
     try {
@@ -98,56 +65,61 @@ class WindowsServiceMonitor {
         console.log(`  ⚠️  No services configured in servers.json`);
         return {
           services: [],
-          systemMetrics: await this.getSystemMetrics(serverConfig)
+          systemMetrics: { cpuPercent: 0, ramPercent: 0 }
         };
       }
       
       console.log(`  📋 Configured services in servers.json:`);
       configuredServiceNames.forEach(name => console.log(`     - ${name}`));
       
-      // Get basic service info - Name, DisplayName, Status ONLY
-      const serviceCommand = `Get-Service | Where-Object {$_.Name -like '*IConduct*' -or $_.DisplayName -like '*IConduct*'} | ForEach-Object {[PSCustomObject]@{Name=$_.Name;DisplayName=$_.DisplayName;Status=$_.Status.ToString()}} | ConvertTo-Json`;
+      // COMBINED COMMAND - Single line, no newlines (CRITICAL for SSH!)
+      const combinedCommand = `$services = Get-Service | Where-Object {$_.Name -like '*IConduct*' -or $_.DisplayName -like '*IConduct*'} | ForEach-Object {[PSCustomObject]@{Name=$_.Name;DisplayName=$_.DisplayName;Status=$_.Status.ToString()}}; $cpu = (Get-WmiObject Win32_Processor | Measure-Object -Property LoadPercentage -Average).Average; if ($cpu -eq $null) { $cpu = 0 }; $os = Get-WmiObject Win32_OperatingSystem; $ram = [math]::Round((1 - ($os.FreePhysicalMemory / $os.TotalVisibleMemorySize)) * 100); if ($ram -eq $null) { $ram = 0 }; [PSCustomObject]@{Services=$services;CPU=[int]$cpu;RAM=[int]$ram} | ConvertTo-Json -Depth 3`;
 
-      const serviceOutput = await sshService.executeCommand(serverConfig, serviceCommand);
+      const output = await sshService.executeCommand(serverConfig, combinedCommand);
       
-      let allServices = [];
-      if (serviceOutput && serviceOutput.trim().length > 0) {
-        try {
-          const cleanOutput = serviceOutput.trim();
-          
-          if (cleanOutput === '[]' || cleanOutput === '') {
-            console.log(`  ⚠️  No IConduct services found on server`);
-            return {
-              services: [],
-              systemMetrics: await this.getSystemMetrics(serverConfig)
-            };
-          }
-          
-          const parsed = JSON.parse(cleanOutput);
-          allServices = Array.isArray(parsed) ? parsed : [parsed];
-          
-          console.log(`  🔍 Found ${allServices.length} IConduct services on server:`);
-          allServices.forEach(s => console.log(`     - ${s.Name} (${s.DisplayName})`));
-        } catch (e) {
-          console.error(`  ❌ Parse error: ${e.message}`);
-          return {
-            services: [],
-            systemMetrics: await this.getSystemMetrics(serverConfig)
-          };
-        }
-      } else {
+      if (!output || output.trim().length === 0) {
         console.log(`  ⚠️  Empty output from server`);
         return {
           services: [],
-          systemMetrics: await this.getSystemMetrics(serverConfig)
+          systemMetrics: { cpuPercent: 0, ramPercent: 0 }
         };
       }
+
+      let parsed;
+      try {
+        parsed = JSON.parse(output.trim());
+      } catch (e) {
+        console.error(`  ❌ Parse error: ${e.message}`);
+        return {
+          services: [],
+          systemMetrics: { cpuPercent: 0, ramPercent: 0 }
+        };
+      }
+
+      // Extract services
+      let allServices = [];
+      if (parsed.Services) {
+        allServices = Array.isArray(parsed.Services) ? parsed.Services : [parsed.Services];
+      }
+
+      if (allServices.length === 0) {
+        console.log(`  ⚠️  No IConduct services found on server`);
+        return {
+          services: [],
+          systemMetrics: {
+            cpuPercent: Math.min(parsed.CPU || 0, 100),
+            ramPercent: Math.min(parsed.RAM || 0, 100)
+          }
+        };
+      }
+
+      console.log(`  🔍 Found ${allServices.length} IConduct services on server:`);
+      allServices.forEach(s => console.log(`     - ${s.Name} (${s.DisplayName})`));
 
       // STRICT FILTERING: Only include services that match EXACTLY
       const filteredServices = [];
       
       for (const service of allServices) {
-        // Check if this service's Name OR DisplayName matches ANY configured name (case-insensitive exact match)
         const isConfigured = configuredServiceNames.some(configName => {
           const configLower = configName.toLowerCase().trim();
           const nameLower = service.Name.toLowerCase().trim();
@@ -175,8 +147,13 @@ class WindowsServiceMonitor {
         return isInConfig;
       });
 
-      // Get system-level metrics
-      const systemMetrics = await this.getSystemMetrics(serverConfig);
+      // Extract system metrics from combined result
+      const systemMetrics = {
+        cpuPercent: Math.min(parsed.CPU || 0, 100),
+        ramPercent: Math.min(parsed.RAM || 0, 100)
+      };
+
+      console.log(`  ✅ System: CPU ${systemMetrics.cpuPercent}%, RAM ${systemMetrics.ramPercent}%`);
 
       // Log which configured services were NOT found
       const foundNames = finalServices.map(s => s.Name.toLowerCase());

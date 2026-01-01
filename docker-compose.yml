@@ -11,9 +11,15 @@ services:
     volumes:
       - ./backend/config:/app/config
       - ./backend/logs:/app/logs
+    env_file:
+      - .env
     environment:
       - NODE_ENV=production
       - PORT=5000
+      - AWS_REGION=eu-central-1
+      - S3_BUCKET=shayg-test-grafana
+      - AWS_ACCESS_KEY_ID
+      - AWS_SECRET_ACCESS_KEY
     restart: unless-stopped
     networks:
       - iconduct-network

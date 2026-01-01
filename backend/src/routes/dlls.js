@@ -1,12 +1,10 @@
+// Full path: backend/src/routes/dlls.js
+
 const express = require('express');
 const router = express.Router();
 const dllManager = require('../services/dllManager');
 const sshService = require('../services/sshService');
 
-/**
- * GET /api/dlls
- * Get all DLLs from all servers
- */
 router.get('/', async (req, res) => {
   try {
     const dlls = await dllManager.getAllDLLs();
@@ -22,10 +20,6 @@ router.get('/', async (req, res) => {
   }
 });
 
-/**
- * GET /api/dlls/summary
- * Get aggregated DLL summary across all servers
- */
 router.get('/summary', async (req, res) => {
   try {
     const summary = await dllManager.getDLLSummary();
@@ -41,10 +35,6 @@ router.get('/summary', async (req, res) => {
   }
 });
 
-/**
- * GET /api/dlls/server/:serverName
- * Get DLLs from a specific server
- */
 router.get('/server/:serverName', async (req, res) => {
   try {
     const { serverName } = req.params;
@@ -72,10 +62,6 @@ router.get('/server/:serverName', async (req, res) => {
   }
 });
 
-/**
- * GET /api/dlls/details/:dllName
- * Get details for a specific DLL across all servers
- */
 router.get('/details/:dllName', async (req, res) => {
   try {
     const { dllName } = req.params;
@@ -94,16 +80,11 @@ router.get('/details/:dllName', async (req, res) => {
   }
 });
 
-/**
- * GET /api/dlls/compare/:dllName
- * Compare versions of a specific DLL across servers
- */
 router.get('/compare/:dllName', async (req, res) => {
   try {
     const { dllName } = req.params;
     const details = await dllManager.getDLLDetails(dllName);
     
-    // Group by version
     const versionMap = new Map();
     details.forEach(dll => {
       if (!versionMap.has(dll.Version)) {
@@ -133,6 +114,71 @@ router.get('/compare/:dllName', async (req, res) => {
       }
     });
   } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+router.post('/update', async (req, res) => {
+  try {
+    const { sourceServer, targetServer, dllName, version } = req.body;
+
+    if (!sourceServer || !targetServer || !dllName || !version) {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing required fields: sourceServer, targetServer, dllName, version'
+      });
+    }
+
+    const servers = sshService.getAllServers();
+    const sourceServerConfig = servers.find(s => s.name === sourceServer);
+    const targetServerConfig = servers.find(s => s.name === targetServer);
+
+    if (!sourceServerConfig) {
+      return res.status(404).json({
+        success: false,
+        error: `Source server not found: ${sourceServer}`
+      });
+    }
+
+    if (!targetServerConfig) {
+      return res.status(404).json({
+        success: false,
+        error: `Target server not found: ${targetServer}`
+      });
+    }
+
+    if (!sourceServerConfig.dllPath) {
+      return res.status(400).json({
+        success: false,
+        error: `Source server ${sourceServer} does not have dllPath configured`
+      });
+    }
+
+    if (!targetServerConfig.dllPath) {
+      return res.status(400).json({
+        success: false,
+        error: `Target server ${targetServer} does not have dllPath configured`
+      });
+    }
+
+    const result = await dllManager.updateDLL(
+      sourceServerConfig,
+      targetServerConfig,
+      dllName,
+      version
+    );
+
+    res.json({
+      success: true,
+      message: `Successfully copied DLL ${dllName} version ${version} from ${sourceServer} to ${targetServer}`,
+      data: result
+    });
+
+  } catch (error) {
+    console.error('DLL update error:', error);
     res.status(500).json({
       success: false,
       error: error.message

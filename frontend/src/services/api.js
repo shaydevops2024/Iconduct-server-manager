@@ -1,16 +1,17 @@
+// Full path: frontend/src/services/api.js
+
 import axios from 'axios';
 
 const API_BASE_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000/api';
 
 const api = axios.create({
   baseURL: API_BASE_URL,
-  timeout: 60000, // 60 seconds
+  timeout: 300000,
   headers: {
     'Content-Type': 'application/json',
   },
 });
 
-// Services API
 export const servicesAPI = {
   getAll: () => api.get('/services'),
   getByGroup: (group) => api.get(`/services/${group}`),
@@ -18,7 +19,6 @@ export const servicesAPI = {
   getGroups: () => api.get('/services/groups'),
 };
 
-// Config API
 export const configAPI = {
   mergeJSON: (files) => {
     const formData = new FormData();
@@ -50,16 +50,16 @@ export const configAPI = {
     }),
 };
 
-// DLL API
 export const dllAPI = {
   getAll: () => api.get('/dlls'),
   getSummary: () => api.get('/dlls/summary'),
   getByServer: (serverName) => api.get(`/dlls/server/${serverName}`),
   getDetails: (dllName) => api.get(`/dlls/details/${dllName}`),
   compare: (dllName) => api.get(`/dlls/compare/${dllName}`),
+  update: (sourceServer, targetServer, dllName, version) => 
+    api.post('/dlls/update', { sourceServer, targetServer, dllName, version }),
 };
 
-// Health check
 export const healthCheck = () => api.get('/health');
 
 export default api;

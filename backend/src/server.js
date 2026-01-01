@@ -1,5 +1,8 @@
+// Full path: backend/src/server.js
+
 const express = require('express');
 const cors = require('cors');
+const compression = require('compression');
 const path = require('path');
 const winston = require('winston');
 
@@ -25,6 +28,7 @@ const logger = winston.createLogger({
 
 // Middleware
 app.use(cors());
+app.use(compression()); // Enable gzip compression for responses
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
@@ -67,6 +71,8 @@ app.use((req, res) => {
 app.listen(PORT, '0.0.0.0', () => {
   logger.info(`🚀 Server running on port ${PORT}`);
   logger.info(`📊 Dashboard: http://localhost:${PORT}/api/health`);
+  logger.info(`⚡ Compression enabled`);
+  logger.info(`📦 Cache enabled (10s TTL)`);
 });
 
 module.exports = app;

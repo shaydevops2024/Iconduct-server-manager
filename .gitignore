@@ -69,6 +69,3 @@ coverage/
 .cache/
 .parcel-cache/
 
-# Lock files (optional - uncomment if you want to exclude them)
-# package-lock.json
-# yarn.lock
