@@ -33,6 +33,15 @@
         "D:\\IConduct\\",
         "D:\\IConduct\\"
       ],
+      "dbConnection": {
+        "server": "<DB IP>",
+        "database": "Iconduct",
+        "user": "<user>",
+        "password": "<password>",
+        "options": {
+          "encrypt": true,
+          "trustServerCertificate": true
+        },
 	  "frontendServers": [
         {
           "name": "V6-FE1-Server",
@@ -50,16 +59,7 @@
           "privateKey": "/app/config/key.pem",
           "dllPath": "C:\inetpub\wwwroot\IConductUI\ConnectorAssemblyCache"
         }
-      ],
-      "dbConnection": {
-        "server": "<DB IP>",
-        "database": "Iconduct",
-        "user": "<user>",
-        "password": "<password>",
-        "options": {
-          "encrypt": true,
-          "trustServerCertificate": true
-        }
+      ]
     }
   ]
 }
