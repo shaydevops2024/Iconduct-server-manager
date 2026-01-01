@@ -429,9 +429,9 @@ class DLLManager {
 
 
 
-      // STEP 10: Verify deployment
+      // STEP 10: Verify primary deployment
 
-      console.log(`🔍 STEP 10: Verifying deployment...`);
+      console.log(`🔍 STEP 10: Verifying primary deployment...`);
 
       const verifyCmd = `if (Test-Path '${targetVersionPath}') { Get-ChildItem -Path '${targetVersionPath}' -File | ForEach-Object { Write-Output "$($_.Name) ($($_.Length) bytes)" } } else { Write-Output "NOT FOUND" }`;
 
@@ -447,7 +447,7 @@ class DLLManager {
 
       
 
-      console.log(`✅ Deployment verified!\n`);
+      console.log(`✅ Primary deployment verified!\n`);
 
       console.log(`Files in ${targetVersionPath}:`);
 
@@ -455,7 +455,95 @@ class DLLManager {
 
 
 
-      console.log(`\n========================================`);
+      // STEP 11: Copy to additional paths (if configured)
+
+      const additionalPaths = targetServerConfig.additionalDllPaths || [];
+
+      if (additionalPaths.length > 0) {
+
+        console.log(`\n📋 STEP 11: Copying to ${additionalPaths.length} additional location(s)...`);
+
+        
+
+        for (let i = 0; i < additionalPaths.length; i++) {
+
+          const additionalBasePath = additionalPaths[i];
+
+          const additionalDllFolder = `${additionalBasePath}\\${dllName}`;
+
+          const additionalVersionPath = `${additionalDllFolder}\\${version}`;
+
+          
+
+          console.log(`\n   📁 Additional Path ${i + 1}/${additionalPaths.length}: ${additionalVersionPath}`);
+
+          
+
+          try {
+
+            // Ensure the DLL folder exists
+
+            const ensureAdditionalFolderCmd = `if (!(Test-Path '${additionalDllFolder}')) { New-Item -ItemType Directory -Path '${additionalDllFolder}' -Force | Out-Null }`;
+
+            await sshService.executeCommand(targetServerConfig, ensureAdditionalFolderCmd);
+
+            
+
+            // Remove old version if exists
+
+            const removeOldAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { Remove-Item -Path '${additionalVersionPath}' -Recurse -Force }`;
+
+            await sshService.executeCommand(targetServerConfig, removeOldAdditionalCmd);
+
+            
+
+            // Copy the version folder
+
+            const copyCmd = `Copy-Item -Path '${targetVersionPath}' -Destination '${additionalVersionPath}' -Recurse -Force`;
+
+            await sshService.executeCommand(targetServerConfig, copyCmd);
+
+            
+
+            // Verify the copy
+
+            const verifyAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { (Get-ChildItem -Path '${additionalVersionPath}' -File).Count } else { Write-Output "0" }`;
+
+            const fileCount = await sshService.executeCommand(targetServerConfig, verifyAdditionalCmd);
+
+            
+
+            if (parseInt(fileCount.trim()) > 0) {
+
+              console.log(`   ✅ Copied successfully (${fileCount.trim()} files)`);
+
+            } else {
+
+              console.log(`   ⚠️  Warning: Copy completed but no files found`);
+
+            }
+
+          } catch (error) {
+
+            console.log(`   ❌ Failed to copy to ${additionalVersionPath}: ${error.message}`);
+
+          }
+
+        }
+
+        
+
+        console.log(`\n✅ Additional paths processed\n`);
+
+      } else {
+
+        console.log(`\nℹ️  No additional paths configured for ${targetServerConfig.name}\n`);
+
+      }
+
+
+
+      console.log(`========================================`);
 
       console.log(`✅ DEPLOYMENT COMPLETE!`);
 
@@ -465,7 +553,19 @@ class DLLManager {
 
       console.log(`Version: ${version}`);
 
-      console.log(`Location: ${targetVersionPath}`);
+      console.log(`Primary Location: ${targetVersionPath}`);
+
+      if (additionalPaths.length > 0) {
+
+        console.log(`Additional Locations: ${additionalPaths.length}`);
+
+        additionalPaths.forEach((p, i) => {
+
+          console.log(`  ${i + 1}. ${p}\\${dllName}\\${version}`);
+
+        });
+
+      }
 
       console.log(`========================================\n`);
 
@@ -484,6 +584,8 @@ class DLLManager {
         version: version,
 
         targetPath: targetVersionPath,
+
+        additionalPaths: additionalPaths.map(p => `${p}\\${dllName}\\${version}`),
 
         deployedFiles: verifyResult.trim().split('\n').filter(line => line.trim()).map(line => {
 
