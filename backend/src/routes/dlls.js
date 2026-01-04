@@ -4,13 +4,41 @@ const express = require('express');
 const router = express.Router();
 const dllManager = require('../services/dllManager');
 const sshService = require('../services/sshService');
+const dbService = require('../services/dbService');
 
 router.get('/', async (req, res) => {
   try {
-    const dlls = await dllManager.getAllDLLs();
+    const forceRefresh = req.query.refresh === 'true';
+    const dlls = await dllManager.getAllDLLs(forceRefresh);
+    
+    const lastRefresh = await dbService.getDLLLastRefresh();
+    
     res.json({
       success: true,
-      data: dlls
+      data: dlls,
+      lastRefresh: lastRefresh,
+      cached: !forceRefresh
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+router.post('/refresh', async (req, res) => {
+  try {
+    console.log('\n🔄 Manual refresh requested\n');
+    const dlls = await dllManager.getAllDLLs(true);
+    
+    const lastRefresh = await dbService.getDLLLastRefresh();
+    
+    res.json({
+      success: true,
+      data: dlls,
+      lastRefresh: lastRefresh,
+      message: 'DLL data refreshed successfully'
     });
   } catch (error) {
     res.status(500).json({

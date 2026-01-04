@@ -1,9 +1,10 @@
+// Full path: frontend/src/pages/DLLManager.js
 
 import React, { useState, useEffect } from 'react';
 
 import { dllAPI } from '../services/api';
 
-import { FaFolder, FaSync, FaChevronDown, FaChevronUp, FaServer, FaBalanceScale, FaTimes, FaUpload, FaSpinner } from 'react-icons/fa';
+import { FaFolder, FaSync, FaChevronDown, FaChevronUp, FaServer, FaBalanceScale, FaTimes, FaUpload, FaSpinner, FaExclamationTriangle } from 'react-icons/fa';
 
 import LoadingSpinner from '../components/LoadingSpinner';
 
@@ -24,6 +25,8 @@ const DLLManager = () => {
   const [searchTerm, setSearchTerm] = useState('');
 
   const [lastUpdate, setLastUpdate] = useState(null);
+
+  const [refreshing, setRefreshing] = useState(false);
 
   
 
@@ -55,9 +58,17 @@ const DLLManager = () => {
 
 
 
-  const fetchDLLs = async () => {
+  const fetchDLLs = async (forceRefresh = false) => {
 
-    setLoading(true);
+    if (forceRefresh) {
+
+      setRefreshing(true);
+
+    } else {
+
+      setLoading(true);
+
+    }
 
     setError(null);
 
@@ -65,11 +76,39 @@ const DLLManager = () => {
 
     try {
 
-      const response = await dllAPI.getAll();
+      let response;
+
+      if (forceRefresh) {
+
+        console.log('🔄 Force refreshing DLL data from servers...');
+
+        response = await dllAPI.refresh();
+
+      } else {
+
+        console.log('📦 Loading DLL data (from cache if available)...');
+
+        response = await dllAPI.getAll();
+
+      }
+
+      
 
       setAllDLLs(response.data.data);
 
-      setLastUpdate(new Date());
+      setLastUpdate(response.data.lastRefresh ? new Date(response.data.lastRefresh) : new Date());
+
+      
+
+      if (response.data.cached && !forceRefresh) {
+
+        console.log('✅ Loaded from cache');
+
+      } else {
+
+        console.log('✅ Fresh data loaded');
+
+      }
 
     } catch (err) {
 
@@ -81,15 +120,19 @@ const DLLManager = () => {
 
       setLoading(false);
 
+      setRefreshing(false);
+
     }
 
   };
 
 
 
+  // Load data once when component mounts - NO AUTO-REFRESH
+
   useEffect(() => {
 
-    fetchDLLs();
+    fetchDLLs(false);
 
   }, []);
 
@@ -481,7 +524,9 @@ const DLLManager = () => {
 
           {lastUpdate && (
 
-            <p className="text-gray-500 text-sm mt-1">Last updated: {lastUpdate.toLocaleTimeString()}</p>
+            <p className="text-gray-500 text-sm mt-1">
+              Last updated: {lastUpdate.toLocaleTimeString()} on {lastUpdate.toLocaleDateString()}
+            </p>
 
           )}
 
@@ -497,11 +542,15 @@ const DLLManager = () => {
 
           </button>
 
-          <button onClick={fetchDLLs} className="flex items-center space-x-2 bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-all shadow-md">
+          <button 
+            onClick={() => fetchDLLs(true)} 
+            disabled={refreshing}
+            className="flex items-center space-x-2 bg-orange-500 text-white px-4 py-2 rounded-lg hover:bg-orange-600 transition-all disabled:opacity-50 shadow-md"
+          >
 
-            <FaSync />
+            <FaSync className={refreshing ? 'animate-spin' : ''} />
 
-            <span>Refresh</span>
+            <span>{refreshing ? 'Refreshing...' : 'Refresh'}</span>
 
           </button>
 
@@ -567,27 +616,69 @@ const DLLManager = () => {
 
             return (
 
-              <div key={serverData.serverName} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden">
+              <div key={serverData.serverName} className={`bg-white dark:bg-gray-800 rounded-lg border shadow-sm overflow-hidden ${
+                serverData.available === false 
+                  ? 'border-red-300 dark:border-red-700 opacity-75' 
+                  : 'border-gray-200 dark:border-gray-700'
+              }`}>
 
                 <button
 
-                  onClick={() => toggleServerExpansion(serverData.serverName)}
+                  onClick={() => serverData.available !== false && toggleServerExpansion(serverData.serverName)}
 
-                  className="w-full p-5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  disabled={serverData.available === false}
+
+                  className={`w-full p-5 flex items-center justify-between transition-colors ${
+                    serverData.available === false
+                      ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-900'
+                      : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                  }`}
 
                 >
 
                   <div className="flex items-center space-x-4">
 
-                    <FaServer className="text-orange-500 text-2xl" />
+                    <FaServer className={`text-2xl ${
+                      serverData.available === false 
+                        ? 'text-red-500' 
+                        : 'text-orange-500'
+                    }`} />
 
                     <div className="text-left">
 
-                      <h3 className="text-xl font-bold text-gray-900 dark:text-white">{serverData.serverGroup}</h3>
+                      <div className="flex items-center space-x-2">
+
+                        <h3 className="text-xl font-bold text-gray-900 dark:text-white">{serverData.serverGroup}</h3>
+
+                        {serverData.available === false && (
+
+                          <span className="flex items-center space-x-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-semibold px-2 py-1 rounded">
+
+                            <FaExclamationTriangle className="text-xs" />
+
+                            <span>UNAVAILABLE</span>
+
+                          </span>
+
+                        )}
+
+                      </div>
 
                       <p className="text-sm text-gray-600 dark:text-gray-400">
 
-                        {serverData.serverName} • {serverData.folders.length} folders{searchTerm && ' (filtered)'}
+                        {serverData.serverName}
+
+                        {serverData.available === false && serverData.errorMessage && (
+
+                          <span className="text-red-500 dark:text-red-400"> • {serverData.errorMessage}</span>
+
+                        )}
+
+                        {serverData.available !== false && (
+
+                          <span> • {serverData.folders.length} folders{searchTerm && ' (filtered)'}</span>
+
+                        )}
 
                       </p>
 
@@ -597,13 +688,21 @@ const DLLManager = () => {
 
                   <div className="flex items-center space-x-3">
 
-                    {isExpanded ? (
+                    {serverData.available !== false && (
 
-                      <FaChevronUp className="text-gray-400 dark:text-gray-500 text-xl" />
+                      <>
 
-                    ) : (
+                        {isExpanded ? (
 
-                      <FaChevronDown className="text-gray-400 dark:text-gray-500 text-xl" />
+                          <FaChevronUp className="text-gray-400 dark:text-gray-500 text-xl" />
+
+                        ) : (
+
+                          <FaChevronDown className="text-gray-400 dark:text-gray-500 text-xl" />
+
+                        )}
+
+                      </>
 
                     )}
 
@@ -613,7 +712,7 @@ const DLLManager = () => {
 
 
 
-                {isExpanded && (
+                {isExpanded && serverData.available !== false && (
 
                   <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-6">
 
@@ -1466,4 +1565,3 @@ const DLLManager = () => {
 
 
 export default DLLManager;
-

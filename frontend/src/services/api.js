@@ -58,6 +58,7 @@ export const dllAPI = {
   compare: (dllName) => api.get(`/dlls/compare/${dllName}`),
   update: (sourceServer, targetServer, dllName, version) => 
     api.post('/dlls/update', { sourceServer, targetServer, dllName, version }),
+  refresh: () => api.post('/dlls/refresh'),
 };
 
 export const healthCheck = () => api.get('/health');

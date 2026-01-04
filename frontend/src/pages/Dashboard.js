@@ -219,6 +219,7 @@ const Dashboard = () => {
                 const serverKey = `${group}-${server.serverName}`;
                 const isExpanded = expandedServer === serverKey;
                 const runningCount = sortedServices.filter(s => s.Status === 'Running').length;
+                const isAvailable = server.available !== false;
                 
                 // Get system metrics - now with percentages
                 const systemMetrics = server.systemMetrics || {
@@ -227,73 +228,108 @@ const Dashboard = () => {
                 };
 
                 return (
-                  <div key={serverKey} className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 shadow-sm overflow-hidden transition-colors duration-200">
+                  <div key={serverKey} className={`bg-white dark:bg-gray-800 rounded-lg border shadow-sm overflow-hidden transition-colors duration-200 ${
+                    !isAvailable 
+                      ? 'border-red-300 dark:border-red-700 opacity-75' 
+                      : 'border-gray-200 dark:border-gray-700'
+                  }`}>
                     {/* Server Header - Clickable */}
                     <button
-                      onClick={() => toggleServerExpansion(serverKey)}
-                      className="w-full p-5 flex items-center justify-between hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                      onClick={() => isAvailable && toggleServerExpansion(serverKey)}
+                      disabled={!isAvailable}
+                      className={`w-full p-5 flex items-center justify-between transition-colors ${
+                        !isAvailable
+                          ? 'cursor-not-allowed bg-gray-100 dark:bg-gray-900'
+                          : 'hover:bg-gray-50 dark:hover:bg-gray-700'
+                      }`}
                     >
                       <div className="flex items-center space-x-4">
-                        <FaServer className="text-orange-500 text-2xl" />
+                        <FaServer className={`text-2xl ${
+                          !isAvailable 
+                            ? 'text-red-500' 
+                            : 'text-orange-500'
+                        }`} />
                         <div className="text-left">
-                          <h3 className="text-xl font-bold text-gray-900 dark:text-white">{group}</h3>
+                          <div className="flex items-center space-x-2">
+                            <h3 className="text-xl font-bold text-gray-900 dark:text-white">{group}</h3>
+                            {!isAvailable && (
+                              <span className="flex items-center space-x-1 bg-red-100 dark:bg-red-900/30 text-red-600 dark:text-red-400 text-xs font-semibold px-2 py-1 rounded">
+                                <FaCircle className="text-xs" />
+                                <span>UNAVAILABLE</span>
+                              </span>
+                            )}
+                          </div>
                           <p className="text-sm text-gray-600 dark:text-gray-400">
-                            {server.serverName} • {runningCount} running / {sortedServices.length} total
+                            {server.serverName}
+                            {!isAvailable && server.errorMessage && (
+                              <span className="text-red-500 dark:text-red-400"> • {server.errorMessage}</span>
+                            )}
+                            {isAvailable && (
+                              <span> • {runningCount} running / {sortedServices.length} total</span>
+                            )}
                           </p>
                         </div>
                       </div>
                       
                       <div className="flex items-center space-x-6">
-                        {/* System Metrics Box - Now showing percentages */}
-                        <div className="bg-gray-50 dark:bg-gray-900 rounded-lg px-4 py-2 border border-gray-200 dark:border-gray-700">
-                          <div className="flex items-center space-x-4">
-                            {/* CPU Percentage */}
-                            <div className="flex items-center space-x-2">
-                              <FaMicrochip className="text-blue-500 text-sm" />
-                              <div className="text-left">
-                                <p className="text-xs text-gray-500 dark:text-gray-400">CPU</p>
-                                <p className="text-sm font-bold text-gray-900 dark:text-white">
-                                  {systemMetrics.cpuPercent}%
-                                </p>
+                        {/* System Metrics Box - Only show for available servers */}
+                        {isAvailable && (
+                          <div className="bg-gray-50 dark:bg-gray-900 rounded-lg px-4 py-2 border border-gray-200 dark:border-gray-700">
+                            <div className="flex items-center space-x-4">
+                              {/* CPU Percentage */}
+                              <div className="flex items-center space-x-2">
+                                <FaMicrochip className="text-blue-500 text-sm" />
+                                <div className="text-left">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">CPU</p>
+                                  <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                    {systemMetrics.cpuPercent}%
+                                  </p>
+                                </div>
                               </div>
-                            </div>
-                            
-                            {/* RAM Percentage */}
-                            <div className="flex items-center space-x-2">
-                              <FaMemory className="text-purple-500 text-sm" />
-                              <div className="text-left">
-                                <p className="text-xs text-gray-500 dark:text-gray-400">RAM</p>
-                                <p className="text-sm font-bold text-gray-900 dark:text-white">
-                                  {systemMetrics.ramPercent}%
-                                </p>
+                              
+                              {/* RAM Percentage */}
+                              <div className="flex items-center space-x-2">
+                                <FaMemory className="text-purple-500 text-sm" />
+                                <div className="text-left">
+                                  <p className="text-xs text-gray-500 dark:text-gray-400">RAM</p>
+                                  <p className="text-sm font-bold text-gray-900 dark:text-white">
+                                    {systemMetrics.ramPercent}%
+                                  </p>
+                                </div>
                               </div>
                             </div>
                           </div>
-                        </div>
+                        )}
 
-                        {/* Running/Stopped indicators */}
-                        <div className="flex items-center space-x-4">
-                          <div className="flex items-center space-x-1">
-                            <FaCircle className="text-green-500 text-xs" />
-                            <span className="text-green-600 dark:text-green-400 font-medium text-sm">{runningCount}</span>
+                        {/* Running/Stopped indicators - Only for available servers */}
+                        {isAvailable && (
+                          <div className="flex items-center space-x-4">
+                            <div className="flex items-center space-x-1">
+                              <FaCircle className="text-green-500 text-xs" />
+                              <span className="text-green-600 dark:text-green-400 font-medium text-sm">{runningCount}</span>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              <FaCircle className="text-red-500 text-xs" />
+                              <span className="text-red-600 dark:text-red-400 font-medium text-sm">{sortedServices.length - runningCount}</span>
+                            </div>
                           </div>
-                          <div className="flex items-center space-x-1">
-                            <FaCircle className="text-red-500 text-xs" />
-                            <span className="text-red-600 dark:text-red-400 font-medium text-sm">{sortedServices.length - runningCount}</span>
-                          </div>
-                        </div>
+                        )}
                         
-                        {/* Chevron */}
-                        {isExpanded ? (
-                          <FaChevronUp className="text-gray-400 dark:text-gray-500 text-xl" />
-                        ) : (
-                          <FaChevronDown className="text-gray-400 dark:text-gray-500 text-xl" />
+                        {/* Chevron - Only for available servers */}
+                        {isAvailable && (
+                          <>
+                            {isExpanded ? (
+                              <FaChevronUp className="text-gray-400 dark:text-gray-500 text-xl" />
+                            ) : (
+                              <FaChevronDown className="text-gray-400 dark:text-gray-500 text-xl" />
+                            )}
+                          </>
                         )}
                       </div>
                     </button>
 
-                    {/* Services Grid - Shown when expanded */}
-                    {isExpanded && (
+                    {/* Services Grid - Shown when expanded and server is available */}
+                    {isExpanded && isAvailable && (
                       <div className="border-t border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 p-6 transition-colors duration-200">
                         {sortedServices.length > 0 ? (
                           <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">

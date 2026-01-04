@@ -1,6 +1,27 @@
 version: '3.8'
 
 services:
+  postgres:
+    image: postgres:15-alpine
+    container_name: iconduct-postgres
+    environment:
+      - POSTGRES_DB=iconduct
+      - POSTGRES_USER=iconduct
+      - POSTGRES_PASSWORD=iconduct_password
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      - ./backend/init-db.sql:/docker-entrypoint-initdb.d/init-db.sql
+    ports:
+      - "5432:5432"
+    restart: unless-stopped
+    networks:
+      - iconduct-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U iconduct"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   backend:
     build:
       context: ./backend
@@ -20,6 +41,14 @@ services:
       - S3_BUCKET=shayg-test-grafana
       - AWS_ACCESS_KEY_ID
       - AWS_SECRET_ACCESS_KEY
+      - DB_HOST=postgres
+      - DB_PORT=5432
+      - DB_NAME=iconduct
+      - DB_USER=iconduct
+      - DB_PASSWORD=iconduct_password
+    depends_on:
+      postgres:
+        condition: service_healthy
     restart: unless-stopped
     networks:
       - iconduct-network
@@ -42,3 +71,6 @@ services:
 networks:
   iconduct-network:
     driver: bridge
+
+volumes:
+  postgres-data:

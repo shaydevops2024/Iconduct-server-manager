@@ -1,6 +1,8 @@
 // Full path: backend/src/services/windowsServiceMonitor.js
+// Full path: backend/src/services/windowsServiceMonitor.js
 
 const sshService = require('./sshService');
+const dbService = require('./dbService');
 
 class WindowsServiceMonitor {
   /**
@@ -9,24 +11,86 @@ class WindowsServiceMonitor {
   async getAllServices() {
     const servers = sshService.getAllServers();
     
+    // Quick availability check first
+    console.log(`\n🔍 Checking availability for ${servers.length} servers...\n`);
+    const availabilityChecks = await Promise.all(
+      servers.map(server => sshService.checkServerAvailability(server))
+    );
+
+    const availableServers = [];
+    const unavailableServers = [];
+
+    servers.forEach((server, index) => {
+      if (availabilityChecks[index].available) {
+        availableServers.push(server);
+      } else {
+        unavailableServers.push({
+          server,
+          error: availabilityChecks[index].error
+        });
+        // Update DB with server unavailable status
+        dbService.updateServerStatus(
+          server.name,
+          server.group,
+          false,
+          availabilityChecks[index].error
+        );
+      }
+    });
+
+    console.log(`✅ Available: ${availableServers.length}, ❌ Unavailable: ${unavailableServers.length}\n`);
+    
     const results = await Promise.allSettled(
-      servers.map(server => this.getServerServices(server))
+      availableServers.map(server => this.getServerServices(server))
     );
 
     // Group by server group
     const groupedServices = {};
+    
+    // Process available servers
     results.forEach((result, index) => {
-      const server = servers[index];
+      const server = availableServers[index];
+      if (!groupedServices[server.group]) {
+        groupedServices[server.group] = [];
+      }
+      
       if (result.status === 'fulfilled') {
-        if (!groupedServices[server.group]) {
-          groupedServices[server.group] = [];
-        }
+        // Update server status as available
+        dbService.updateServerStatus(server.name, server.group, true, null);
+        
         groupedServices[server.group].push({
           serverName: server.name,
           services: result.value.services,
-          systemMetrics: result.value.systemMetrics
+          systemMetrics: result.value.systemMetrics,
+          available: true
+        });
+      } else {
+        // Update server status as unavailable
+        dbService.updateServerStatus(server.name, server.group, false, result.reason.message);
+        
+        groupedServices[server.group].push({
+          serverName: server.name,
+          services: [],
+          systemMetrics: { cpuPercent: 0, ramPercent: 0 },
+          available: false,
+          errorMessage: result.reason.message
         });
       }
+    });
+
+    // Add unavailable servers to response
+    unavailableServers.forEach(({ server, error }) => {
+      if (!groupedServices[server.group]) {
+        groupedServices[server.group] = [];
+      }
+      
+      groupedServices[server.group].push({
+        serverName: server.name,
+        services: [],
+        systemMetrics: { cpuPercent: 0, ramPercent: 0 },
+        available: false,
+        errorMessage: error
+      });
     });
 
     return groupedServices;

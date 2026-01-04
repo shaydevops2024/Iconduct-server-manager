@@ -1,4 +1,6 @@
+// Full path: backend/src/services/dllManager.js
 const sshService = require('./sshService');
+const dbService = require('./dbService');
 const { S3Client, PutObjectCommand, DeleteObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
 const sql = require('mssql');
@@ -16,36 +18,131 @@ class DLLManager {
     this.S3_REGION = process.env.AWS_REGION || 'eu-central-1';
   }
 
-  async getAllDLLs() {
-    const servers = sshService.getAllServers();
+  async getAllDLLs(forceRefresh = false) {
     console.log(`\n========================================`);
+    console.log(`${forceRefresh ? '🔄 FORCE REFRESH' : '📦 Getting'} DLL data...`);
+    console.log(`========================================\n`);
+
+    // If not forcing refresh, try to get from cache
+    if (!forceRefresh) {
+      const cachedData = await dbService.getCachedDLLs();
+      if (cachedData && cachedData.length > 0) {
+        const lastRefresh = await dbService.getDLLLastRefresh();
+        console.log(`✅ Returning cached DLL data from database`);
+        console.log(`   Last refresh: ${lastRefresh || 'Unknown'}`);
+        console.log(`   Servers: ${cachedData.length}`);
+        console.log(`========================================\n`);
+        
+        // Return cached data with server statuses
+        const statuses = await dbService.getAllServerStatuses();
+        return cachedData.map(server => ({
+          ...server,
+          available: statuses[server.serverName]?.isAvailable ?? true,
+          errorMessage: statuses[server.serverName]?.errorMessage || null
+        }));
+      }
+      console.log(`⚠️  No cached data found, fetching from servers...\n`);
+    }
+
+    // Force refresh or no cache - fetch from servers
+    const servers = sshService.getAllServers();
     console.log(`Scanning DLLs on ${servers.length} servers...`);
     console.log(`========================================\n`);
 
+    // First, do quick availability checks for all servers
+    console.log(`🔍 Checking server availability (fast TCP check)...\n`);
+    const availabilityChecks = await Promise.all(
+      servers.map(server => sshService.checkServerAvailability(server))
+    );
+
+    const availableServers = [];
+    const unavailableServers = [];
+
+    servers.forEach((server, index) => {
+      if (availabilityChecks[index].available) {
+        availableServers.push(server);
+      } else {
+        unavailableServers.push({
+          server,
+          error: availabilityChecks[index].error
+        });
+        // Update DB with server unavailable status
+        dbService.updateServerStatus(
+          server.name,
+          server.group,
+          false,
+          availabilityChecks[index].error
+        );
+      }
+    });
+
+    console.log(`\n✅ Available servers: ${availableServers.length}/${servers.length}`);
+    console.log(`❌ Unavailable servers: ${unavailableServers.length}/${servers.length}\n`);
+
+    // Fetch DLLs only from available servers
     const results = await Promise.allSettled(
-      servers.map(server => this.getServerDLLs(server))
+      availableServers.map(server => this.getServerDLLs(server))
     );
 
     const dllData = [];
-    results.forEach((result, index) => {
-      const server = servers[index];
+
+    // Process available servers
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
+      const server = availableServers[i];
+      
       if (result.status === 'fulfilled') {
         console.log(`✅ Found ${result.value.length} DLLs on ${server.name}`);
+        
+        // Cache in database
+        await dbService.cacheDLLData(server.name, server.group, result.value);
+        
+        // Update server status as available
+        await dbService.updateServerStatus(server.name, server.group, true, null);
+        
         dllData.push({
           serverName: server.name,
           serverGroup: server.group,
-          dlls: result.value
+          dlls: result.value,
+          available: true
         });
       } else {
         console.error(`❌ Error getting DLLs from ${server.name}:`, result.reason.message);
+        
+        // Update server status as unavailable
+        await dbService.updateServerStatus(server.name, server.group, false, result.reason.message);
+        
         dllData.push({
           serverName: server.name,
           serverGroup: server.group,
           dlls: [],
-          error: result.reason.message
+          available: false,
+          errorMessage: result.reason.message
         });
       }
+    }
+
+    // Add unavailable servers to response
+    unavailableServers.forEach(({ server, error }) => {
+      console.log(`⚠️  Skipped ${server.name} - ${error}`);
+      dllData.push({
+        serverName: server.name,
+        serverGroup: server.group,
+        dlls: [],
+        available: false,
+        errorMessage: error
+      });
     });
+
+    // Update last refresh timestamp
+    await dbService.updateDLLRefreshTime();
+
+    console.log(`\n========================================`);
+    console.log(`✅ DLL scan complete!`);
+    console.log(`   Total servers: ${servers.length}`);
+    console.log(`   Available: ${availableServers.length}`);
+    console.log(`   Unavailable: ${unavailableServers.length}`);
+    console.log(`========================================\n`);
 
     return dllData;
   }
