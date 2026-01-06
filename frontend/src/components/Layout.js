@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FaServer, FaCog, FaFileCode, FaSun, FaMoon } from 'react-icons/fa';
+import { FaServer, FaCog, FaFileCode, FaSun, FaMoon, FaLock, FaRocket } from 'react-icons/fa';
 import { useTheme } from '../context/ThemeContext';
 
 const Layout = ({ children }) => {
@@ -13,6 +13,8 @@ const Layout = ({ children }) => {
     { path: '/', label: 'Dashboard', icon: FaServer },
     { path: '/config-merger', label: 'Config Merger', icon: FaCog },
     { path: '/dll-manager', label: 'DLL Manager', icon: FaFileCode },
+    { path: '/create-pfx', label: 'Create PFX', icon: FaLock },
+    { path: '/deploy-ssl', label: 'Deploy SSL', icon: FaRocket },
   ];
 
   return (

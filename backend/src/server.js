@@ -42,11 +42,15 @@ app.use((req, res, next) => {
 const servicesRoutes = require('./routes/services');
 const configRoutes = require('./routes/configs');
 const dllRoutes = require('./routes/dlls');
+const pfxRoutes = require('./routes/pfx');
+const sslDeployRoutes = require('./routes/ssl-deploy');
 
 // Use routes
 app.use('/api/services', servicesRoutes);
 app.use('/api/configs', configRoutes);
 app.use('/api/dlls', dllRoutes);
+app.use('/api/pfx', pfxRoutes);
+app.use('/api/ssl-deploy', sslDeployRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -73,6 +77,7 @@ app.listen(PORT, '0.0.0.0', () => {
   logger.info(`📊 Dashboard: http://localhost:${PORT}/api/health`);
   logger.info(`⚡ Compression enabled`);
   logger.info(`📦 Cache enabled (10s TTL)`);
+  logger.info(`🔐 SSL Deploy enabled`);
 });
 
 module.exports = app;

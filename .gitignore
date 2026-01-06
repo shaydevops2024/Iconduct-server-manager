@@ -62,10 +62,17 @@ id_rsa*
 # Config with sensitive data
 backend/config/servers.json
 
+# PFX Certificate files and directories
+backend/config/ssl/
+backend/pfx-output/
+backend/temp/
+*.pfx
+*.crt
+*.csr
+
 # Test coverage
 coverage/
 
 # Cache
 .cache/
 .parcel-cache/
-
