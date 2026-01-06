@@ -127,7 +127,7 @@ router.get('/servers', (req, res) => {
  */
 router.post('/deploy', async (req, res) => {
   try {
-    const { pfxFilename, pfxPassword, backendServers, frontendServers } = req.body;
+    const { pfxFilename, pfxPassword, backendServers, frontendServers, ports } = req.body;
 
     // Validation
     if (!pfxFilename) {
@@ -151,6 +151,10 @@ router.post('/deploy', async (req, res) => {
       });
     }
 
+    // Validate ports
+    const selectedPorts = ports && ports.length > 0 ? ports : ['8443'];
+    console.log('🔌 Selected ports:', selectedPorts.join(', '));
+
     // Verify PFX file exists
     const pfxPath = path.join(PFX_OUTPUT_DIR, pfxFilename);
     try {
@@ -167,7 +171,7 @@ router.post('/deploy', async (req, res) => {
     console.log(`   PFX: ${pfxFilename}`);
     console.log(`   Backend servers: ${backendServers.length}`);
     console.log(`   Frontend servers: ${frontendServers ? frontendServers.length : 0}`);
-    console.log(`   ⚠️  TESTING MODE: Port 8443 ONLY`);
+    console.log(`   🔌 Ports: ${selectedPorts.join(', ')}`);
     console.log(`========================================\n`);
 
     const deploymentResults = {
@@ -210,7 +214,7 @@ router.post('/deploy', async (req, res) => {
         }
 
         console.log(`\n🔄 Deploying to backend: ${serverName}`);
-        const result = await sslDeployService.deployToBackend(serverConfig, pfxFilename, pfxPassword);
+        const result = await sslDeployService.deployToBackend(serverConfig, pfxFilename, pfxPassword, selectedPorts);
         
         deploymentResults.backend.push(result);
         
@@ -253,7 +257,7 @@ router.post('/deploy', async (req, res) => {
             }
 
             console.log(`\n🔄 Deploying to frontend: ${serverName}`);
-            const result = await sslDeployService.deployToFrontend(serverConfig, sourceBackend, pfxPassword, pfxFilename);
+            const result = await sslDeployService.deployToFrontend(serverConfig, sourceBackend, pfxPassword, pfxFilename, selectedPorts);
             
             deploymentResults.frontend.push(result);
             

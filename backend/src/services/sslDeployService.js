@@ -12,7 +12,7 @@ class SSLDeployService {
   /**
    * Deploy SSL certificate to backend server
    */
-  async deployToBackend(serverConfig, pfxFilename, pfxPassword) {
+  async deployToBackend(serverConfig, pfxFilename, pfxPassword, ports = ['8443']) {
     const results = {
       server: serverConfig.name,
       success: false,
@@ -118,20 +118,58 @@ class SSLDeployService {
       const appIdSource = appId === '{00000000-0000-0000-0000-000000000000}' ? '(default - port 443 not found)' : '(from port 443)';
       results.steps.push({ step: 'Get Application ID ' + appIdSource, status: 'success', appId });
 
-      // Step 8: Update SSL binding for port 8443
-      const updateBindingCmd = '$thumbprint = "' + thumbprint + '"; ' +
-        '$appId = "' + appId + '"; ' +
-        '$existingBinding = netsh http show sslcert ipport=0.0.0.0:8443 2>$null; ' +
-        'if ($existingBinding -match "Certificate Hash") { netsh http delete sslcert ipport=0.0.0.0:8443 | Out-Null }; ' +
-        '$output = netsh http add sslcert ipport=0.0.0.0:8443 certhash=$thumbprint appid=$appId 2>&1 | Out-String; ' +
-        'if ($LASTEXITCODE -ne 0) { Write-Output "NETSH_ERROR: $output" } ' +
-        'else { Write-Output "SSL binding updated for port 8443" }';
-      const bindingResult = await sshService.executeCommand(serverConfig, updateBindingCmd);
+      // Step 8: Update SSL bindings for all selected ports
+      console.log('🔌 Deploying to ports:', ports.join(', '));
+      console.log('🔑 Using App ID for ALL ports:', appId);
       
-      if (bindingResult.includes('NETSH_ERROR:')) {
-        throw new Error('netsh failed: ' + bindingResult.replace('NETSH_ERROR:', ''));
+      const portResults = [];
+      for (const port of ports) {
+        try {
+          console.log(`📍 Port ${port}: Creating binding with App ID ${appId}...`);
+          
+          const updateBindingCmd = '$thumbprint = "' + thumbprint + '"; ' +
+            '$appId = "' + appId + '"; ' +
+            '$port = "' + port + '"; ' +
+            'Write-Output "Creating binding for port $port with App ID: $appId"; ' +
+            '$existingBinding = netsh http show sslcert ipport=0.0.0.0:$port 2>$null; ' +
+            'if ($existingBinding -match "Certificate Hash") { netsh http delete sslcert ipport=0.0.0.0:$port | Out-Null }; ' +
+            '$output = netsh http add sslcert ipport=0.0.0.0:$port certhash=$thumbprint appid=$appId 2>&1 | Out-String; ' +
+            'if ($LASTEXITCODE -ne 0) { Write-Output "NETSH_ERROR: $output" } ' +
+            'else { Write-Output "SSL binding updated for port $port with App ID: $appId" }';
+          const bindingResult = await sshService.executeCommand(serverConfig, updateBindingCmd);
+          
+          console.log(`📍 Port ${port} result:`, bindingResult);
+          
+          if (bindingResult.includes('NETSH_ERROR:')) {
+            throw new Error('netsh failed: ' + bindingResult.replace('NETSH_ERROR:', ''));
+          }
+          
+          portResults.push({ port, status: 'success', appId });
+          console.log(`✅ Port ${port} binding updated with App ID: ${appId}`);
+        } catch (error) {
+          portResults.push({ port, status: 'error', error: error.message });
+          console.error(`❌ Port ${port} binding failed:`, error.message);
+        }
       }
-      results.steps.push({ step: 'Update SSL binding (port 8443 ONLY)', status: 'success' });
+      
+      results.portBindings = portResults;
+      const successfulPorts = portResults.filter(p => p.status === 'success').map(p => p.port).join(', ');
+      const failedPorts = portResults.filter(p => p.status === 'error').map(p => p.port).join(', ');
+      
+      if (failedPorts) {
+        results.steps.push({ 
+          step: 'Update SSL bindings', 
+          status: 'partial', 
+          success: successfulPorts, 
+          failed: failedPorts 
+        });
+      } else {
+        results.steps.push({ 
+          step: 'Update SSL bindings', 
+          status: 'success', 
+          ports: successfulPorts 
+        });
+      }
 
       // Step 9: Move certificate files to final destination
       const finalCertFile = sslConfig.finalPath + '\\' + sslConfig.certFile;
@@ -166,7 +204,7 @@ class SSLDeployService {
   /**
    * Deploy SSL certificate to frontend server
    */
-  async deployToFrontend(serverConfig, backendResult, pfxPassword, pfxFilename) {
+  async deployToFrontend(serverConfig, backendResult, pfxPassword, pfxFilename, ports = ['8443']) {
     const results = {
       server: serverConfig.name,
       success: false,
@@ -242,14 +280,21 @@ class SSLDeployService {
       results.thumbprint = thumbprint;
       results.steps.push({ step: 'Import to certificate store', status: 'success', thumbprint });
 
-      // Step 7: Get Application ID from port 443
-      console.log('📝 Getting App ID from port 443...');
+      // Step 7: Get Application ID from BACKEND server's port 443
+      console.log('📝 Getting App ID from BACKEND server port 443...');
+      
+      const backendConfigForAppId = serverConfig.parentBackend;
+      if (!backendConfigForAppId) {
+        throw new Error('Backend server configuration not found for App ID lookup');
+      }
+      
       const getAppIdCmd = 'netsh http show sslcert ipport=0.0.0.0:443';
       let appId = '{00000000-0000-0000-0000-000000000000}'; // Default
       
       try {
-        const port443Output = await sshService.executeCommand(serverConfig, getAppIdCmd);
-        console.log('📝 Port 443 output:', port443Output);
+        // Query BACKEND server's port 443 (not frontend's)
+        const port443Output = await sshService.executeCommand(backendConfigForAppId, getAppIdCmd);
+        console.log('📝 BACKEND Port 443 output:', port443Output);
         
         // Parse output line by line
         const lines = port443Output.split('\n');
@@ -260,38 +305,76 @@ class SSLDeployService {
             const match = line.match(/\{[0-9a-fA-F-]{36}\}/);
             if (match) {
               appId = match[0];
-              console.log('✅ Found App ID from port 443:', appId);
+              console.log('✅ Found App ID from BACKEND port 443:', appId);
               break;
             }
           }
         }
         
         if (appId === '{00000000-0000-0000-0000-000000000000}') {
-          console.log('⚠️  Port 443 not found or no App ID, using default');
+          console.log('⚠️  BACKEND port 443 not found or no App ID, using default');
         }
       } catch (error) {
-        console.log('⚠️  Could not query port 443:', error.message);
+        console.log('⚠️  Could not query BACKEND port 443:', error.message);
         console.log('⚠️  Using default App ID');
       }
       
       results.appId = appId;
-      const appIdSource = appId === '{00000000-0000-0000-0000-000000000000}' ? '(default - port 443 not found)' : '(from port 443)';
+      const appIdSource = appId === '{00000000-0000-0000-0000-000000000000}' ? '(default - backend port 443 not found)' : '(from backend port 443)';
       results.steps.push({ step: 'Get Application ID ' + appIdSource, status: 'success', appId });
 
-      // Step 8: Update SSL binding for port 8443
-      const updateNetshCmd = '$thumbprint = "' + thumbprint + '"; ' +
-        '$appId = "' + appId + '"; ' +
-        '$existingBinding = netsh http show sslcert ipport=0.0.0.0:8443 2>$null; ' +
-        'if ($existingBinding -match "Certificate Hash") { netsh http delete sslcert ipport=0.0.0.0:8443 | Out-Null }; ' +
-        '$output = netsh http add sslcert ipport=0.0.0.0:8443 certhash=$thumbprint appid=$appId 2>&1 | Out-String; ' +
-        'if ($LASTEXITCODE -ne 0) { Write-Output "NETSH_ERROR: $output" } ' +
-        'else { Write-Output "SSL binding updated for port 8443" }';
-      const bindingResult = await sshService.executeCommand(serverConfig, updateNetshCmd);
+      // Step 8: Update SSL bindings for all selected ports
+      console.log('🔌 Deploying to ports:', ports.join(', '));
+      console.log('🔑 Using App ID for ALL ports:', appId);
       
-      if (bindingResult.includes('NETSH_ERROR:')) {
-        throw new Error('netsh failed: ' + bindingResult.replace('NETSH_ERROR:', ''));
+      const portResults = [];
+      for (const port of ports) {
+        try {
+          console.log(`📍 Port ${port}: Creating binding with App ID ${appId}...`);
+          
+          const updateNetshCmd = '$thumbprint = "' + thumbprint + '"; ' +
+            '$appId = "' + appId + '"; ' +
+            '$port = "' + port + '"; ' +
+            'Write-Output "Creating binding for port $port with App ID: $appId"; ' +
+            '$existingBinding = netsh http show sslcert ipport=0.0.0.0:$port 2>$null; ' +
+            'if ($existingBinding -match "Certificate Hash") { netsh http delete sslcert ipport=0.0.0.0:$port | Out-Null }; ' +
+            '$output = netsh http add sslcert ipport=0.0.0.0:$port certhash=$thumbprint appid=$appId 2>&1 | Out-String; ' +
+            'if ($LASTEXITCODE -ne 0) { Write-Output "NETSH_ERROR: $output" } ' +
+            'else { Write-Output "SSL binding updated for port $port with App ID: $appId" }';
+          const bindingResult = await sshService.executeCommand(serverConfig, updateNetshCmd);
+          
+          console.log(`📍 Port ${port} result:`, bindingResult);
+          
+          if (bindingResult.includes('NETSH_ERROR:')) {
+            throw new Error('netsh failed: ' + bindingResult.replace('NETSH_ERROR:', ''));
+          }
+          
+          portResults.push({ port, status: 'success', appId });
+          console.log(`✅ Port ${port} binding updated with App ID: ${appId}`);
+        } catch (error) {
+          portResults.push({ port, status: 'error', error: error.message });
+          console.error(`❌ Port ${port} binding failed:`, error.message);
+        }
       }
-      results.steps.push({ step: 'Update SSL binding (port 8443 ONLY)', status: 'success' });
+      
+      results.portBindings = portResults;
+      const successfulPorts = portResults.filter(p => p.status === 'success').map(p => p.port).join(', ');
+      const failedPorts = portResults.filter(p => p.status === 'error').map(p => p.port).join(', ');
+      
+      if (failedPorts) {
+        results.steps.push({ 
+          step: 'Update SSL bindings', 
+          status: 'partial', 
+          success: successfulPorts, 
+          failed: failedPorts 
+        });
+      } else {
+        results.steps.push({ 
+          step: 'Update SSL bindings', 
+          status: 'success', 
+          ports: successfulPorts 
+        });
+      }
 
       // Step 9: Move certificates to final destination
       const finalCertFile = sslConfig.finalPath + '\\' + sslConfig.certFile;
