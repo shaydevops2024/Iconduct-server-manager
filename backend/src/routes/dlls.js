@@ -151,30 +151,30 @@ router.get('/compare/:dllName', async (req, res) => {
 
 router.post('/update', async (req, res) => {
   try {
-    const { sourceServer, targetServer, dllName, version } = req.body;
+    const { sourceServer, targetServer, targetServers, dllName, version } = req.body;
 
-    if (!sourceServer || !targetServer || !dllName || !version) {
+    // Handle both single server (backward compatibility) and multiple servers
+    let targets = [];
+    if (targetServers && Array.isArray(targetServers)) {
+      targets = targetServers;
+    } else if (targetServer) {
+      targets = [targetServer];
+    }
+
+    if (!sourceServer || targets.length === 0 || !dllName || !version) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: sourceServer, targetServer, dllName, version'
+        error: 'Missing required fields: sourceServer, targetServer(s), dllName, version'
       });
     }
 
     const servers = sshService.getAllServers();
     const sourceServerConfig = servers.find(s => s.name === sourceServer);
-    const targetServerConfig = servers.find(s => s.name === targetServer);
 
     if (!sourceServerConfig) {
       return res.status(404).json({
         success: false,
         error: `Source server not found: ${sourceServer}`
-      });
-    }
-
-    if (!targetServerConfig) {
-      return res.status(404).json({
-        success: false,
-        error: `Target server not found: ${targetServer}`
       });
     }
 
@@ -185,24 +185,94 @@ router.post('/update', async (req, res) => {
       });
     }
 
-    if (!targetServerConfig.dllPath) {
-      return res.status(400).json({
-        success: false,
-        error: `Target server ${targetServer} does not have dllPath configured`
-      });
+    // Validate all target servers
+    const targetServerConfigs = [];
+    for (const target of targets) {
+      const config = servers.find(s => s.name === target);
+      if (!config) {
+        return res.status(404).json({
+          success: false,
+          error: `Target server not found: ${target}`
+        });
+      }
+      if (!config.dllPath) {
+        return res.status(400).json({
+          success: false,
+          error: `Target server ${target} does not have dllPath configured`
+        });
+      }
+      targetServerConfigs.push(config);
     }
 
-    const result = await dllManager.updateDLL(
-      sourceServerConfig,
-      targetServerConfig,
-      dllName,
-      version
-    );
+    console.log(`\n========================================`);
+    console.log(`MULTI-SERVER DLL DEPLOYMENT`);
+    console.log(`========================================`);
+    console.log(`Source: ${sourceServer}`);
+    console.log(`Targets: ${targets.join(', ')}`);
+    console.log(`DLL: ${dllName}`);
+    console.log(`Version: ${version}`);
+    console.log(`========================================\n`);
+
+    // Deploy to each target server
+    const results = [];
+    let successCount = 0;
+    let failureCount = 0;
+
+    for (let i = 0; i < targetServerConfigs.length; i++) {
+      const targetConfig = targetServerConfigs[i];
+      console.log(`\n[${i + 1}/${targetServerConfigs.length}] Deploying to ${targetConfig.name}...`);
+      
+      try {
+        const result = await dllManager.updateDLL(
+          sourceServerConfig,
+          targetConfig,
+          dllName,
+          version
+        );
+
+        results.push({
+          success: true,
+          targetServer: targetConfig.name,
+          data: result
+        });
+        successCount++;
+        console.log(`✅ [${i + 1}/${targetServerConfigs.length}] Success: ${targetConfig.name}\n`);
+      } catch (error) {
+        results.push({
+          success: false,
+          targetServer: targetConfig.name,
+          error: error.message
+        });
+        failureCount++;
+        console.error(`❌ [${i + 1}/${targetServerConfigs.length}] Failed: ${targetConfig.name} - ${error.message}\n`);
+      }
+    }
+
+    console.log(`\n========================================`);
+    console.log(`DEPLOYMENT SUMMARY`);
+    console.log(`========================================`);
+    console.log(`Total Servers: ${targetServerConfigs.length}`);
+    console.log(`Successful: ${successCount}`);
+    console.log(`Failed: ${failureCount}`);
+    console.log(`========================================\n`);
+
+    // Return overall success if at least one deployment succeeded
+    const overallSuccess = successCount > 0;
+    const message = successCount === targetServerConfigs.length
+      ? `Successfully deployed DLL ${dllName} version ${version} to all ${successCount} servers`
+      : failureCount === targetServerConfigs.length
+        ? `Failed to deploy DLL ${dllName} to all servers`
+        : `Deployed DLL ${dllName} version ${version} to ${successCount}/${targetServerConfigs.length} servers`;
 
     res.json({
-      success: true,
-      message: `Successfully copied DLL ${dllName} version ${version} from ${sourceServer} to ${targetServer}`,
-      data: result
+      success: overallSuccess,
+      message: message,
+      results: results,
+      summary: {
+        total: targetServerConfigs.length,
+        successful: successCount,
+        failed: failureCount
+      }
     });
 
   } catch (error) {

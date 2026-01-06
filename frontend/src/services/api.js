@@ -56,8 +56,17 @@ export const dllAPI = {
   getByServer: (serverName) => api.get(`/dlls/server/${serverName}`),
   getDetails: (dllName) => api.get(`/dlls/details/${dllName}`),
   compare: (dllName) => api.get(`/dlls/compare/${dllName}`),
-  update: (sourceServer, targetServer, dllName, version) => 
-    api.post('/dlls/update', { sourceServer, targetServer, dllName, version }),
+  // Updated to support both single server and multiple servers
+  update: (sourceServer, targetServers, dllName, version) => {
+    // If targetServers is a string, convert to array for backward compatibility
+    const targets = Array.isArray(targetServers) ? targetServers : [targetServers];
+    return api.post('/dlls/update', { 
+      sourceServer, 
+      targetServers: targets, 
+      dllName, 
+      version 
+    });
+  },
   refresh: () => api.post('/dlls/refresh'),
 };
 
