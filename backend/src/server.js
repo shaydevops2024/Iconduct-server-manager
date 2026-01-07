@@ -44,6 +44,7 @@ const configRoutes = require('./routes/configs');
 const dllRoutes = require('./routes/dlls');
 const pfxRoutes = require('./routes/pfx');
 const sslDeployRoutes = require('./routes/ssl-deploy');
+const encryptionRoutes = require('./routes/encryption');
 
 // Use routes
 app.use('/api/services', servicesRoutes);
@@ -51,6 +52,7 @@ app.use('/api/configs', configRoutes);
 app.use('/api/dlls', dllRoutes);
 app.use('/api/pfx', pfxRoutes);
 app.use('/api/ssl-deploy', sslDeployRoutes);
+app.use('/api/encryption', encryptionRoutes);
 
 // Health check endpoint
 app.get('/api/health', (req, res) => {
@@ -78,6 +80,7 @@ app.listen(PORT, '0.0.0.0', () => {
   logger.info(`⚡ Compression enabled`);
   logger.info(`📦 Cache enabled (10s TTL)`);
   logger.info(`🔐 SSL Deploy enabled`);
+  logger.info(`🔑 Encryption enabled`);
 });
 
 module.exports = app;

@@ -70,6 +70,11 @@ export const dllAPI = {
   refresh: () => api.post('/dlls/refresh'),
 };
 
+export const encryptionAPI = {
+  process: (operation, text) => api.post('/encryption/process', { operation, text }),
+  testConnection: () => api.get('/encryption/test-connection'),
+};
+
 export const healthCheck = () => api.get('/health');
 
 export default api;
