@@ -129,15 +129,17 @@ class SSHService {
         conn.end();
         reject(new Error(`SSH connection error to ${serverConfig.name}: ${err.message}`));
       }).connect({
-        host: serverConfig.host,
-        port: serverConfig.port || 22,
-        username: serverConfig.username,
-        password: serverConfig.password,
-        privateKey: serverConfig.privateKey ? fs.readFileSync(serverConfig.privateKey) : undefined,
-        readyTimeout: 30000,
-        keepaliveInterval: 10000,
-        keepaliveCountMax: 3,
-      });
+      host: serverConfig.host,
+      port: serverConfig.port || 22,
+      username: serverConfig.username,
+      password: serverConfig.password,
+      privateKey: serverConfig.privateKey ? fs.readFileSync(serverConfig.privateKey) : undefined,
+      readyTimeout: 30000,
+      keepaliveInterval: 10000,
+      keepaliveCountMax: 3,
+      algorithms: { serverHostKey: ['ssh-rsa', 'ssh-dss', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521'] },
+      hostVerifier: () => true,  // ← ADD THIS LINE (disables host verification)
+    });
     });
   }
 

@@ -82,7 +82,8 @@ const Layout = ({ children }) => {
       {/* Footer */}
       <footer className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 mt-auto shadow-inner transition-colors duration-200">
         <div className="container mx-auto px-4 py-4 text-center text-gray-600 dark:text-gray-400 text-sm">
-          <p>IConduct Server Management © {new Date().getFullYear()}</p>
+          <h4>IConduct Server Management © 2025-{new Date().getFullYear()}</h4>
+          <h4>Developed by Shay Guedj</h4>
         </div>
       </footer>
     </div>

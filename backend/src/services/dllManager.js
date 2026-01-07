@@ -450,7 +450,7 @@ class DLLManager {
             const removeOldAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { Remove-Item -Path '${additionalVersionPath}' -Recurse -Force }`;
             await sshService.executeCommand(targetServerConfig, removeOldAdditionalCmd);
             
-            const copyCmd = `Copy-Item -Path '${targetVersionPath}' -Destination '${additionalVersionPath}' -Recurse -Force`;
+            const copyCmd = `Copy-Item -Path '${targetVersionPath}\\*' -Destination '${additionalVersionPath}' -Recurse -Force`;
             await sshService.executeCommand(targetServerConfig, copyCmd);
             
             const verifyAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { (Get-ChildItem -Path '${additionalVersionPath}' -File).Count } else { Write-Output "0" }`;

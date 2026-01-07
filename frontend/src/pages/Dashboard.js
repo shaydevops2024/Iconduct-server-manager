@@ -252,6 +252,7 @@ const Dashboard = () => {
   };
 
   const stats = getStats();
+  const hasAlerts = stats.highResourceServers.length > 0;
 
   // Skeleton loader component
   const ServerSkeleton = () => (
@@ -400,37 +401,63 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {/* System Health Card */}
-        <div className="bg-white dark:bg-gray-800 rounded-lg p-6 border border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
+        {/* System Health Card - ENHANCED AGGRESSIVE ALERT MODE */}
+        <div className={`bg-white dark:bg-gray-800 rounded-lg p-6 border shadow-sm transition-all duration-200 relative ${
+          hasAlerts
+            ? 'alert-pulse-border alert-background-pulse'
+            : 'border-gray-200 dark:border-gray-700'
+        }`}>
+          {/* LARGE Pulsing Numbered Badge - Top Right Corner */}
+          {hasAlerts && (
+            <div className="absolute -top-3 -right-3 z-10">
+              <div className="relative flex items-center justify-center">
+                {/* Outer pulsing ring */}
+                <span className="absolute inline-flex h-14 w-14">
+                  <span className="animate-ping-aggressive absolute inline-flex h-full w-full rounded-full bg-red-500 opacity-75"></span>
+                </span>
+                {/* Solid badge with number */}
+                <div className="relative flex items-center justify-center h-14 w-14 bg-gradient-to-br from-red-500 to-red-600 rounded-full shadow-2xl border-4 border-white dark:border-gray-800 alert-badge-pulse">
+                  <span className="text-white font-black text-xl">{stats.highResourceServers.length}</span>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {/* Header with ALERT badge */}
           <div className="flex items-center space-x-3 mb-4">
             <div className="text-2xl">📊</div>
             <h3 className="text-lg font-semibold text-gray-900 dark:text-white">System Health</h3>
+            {hasAlerts && (
+              <span className="alert-label-pulse bg-red-500 text-white text-xs font-bold px-3 py-1 rounded-full uppercase tracking-wide shadow-lg">
+                Alert
+              </span>
+            )}
           </div>
           
-          {stats.highResourceServers.length === 0 ? (
+          {!hasAlerts ? (
             <div className="flex flex-col items-center justify-center py-4">
               <FaCheckCircle className="text-green-500 text-4xl mb-2" />
               <span className="text-lg font-medium text-green-600 dark:text-green-400">All servers healthy</span>
             </div>
           ) : (
             <div className="space-y-2">
-              <div className="flex items-center space-x-2 mb-3">
-                <FaExclamationTriangle className="text-yellow-500 text-xl" />
-                <span className="text-lg font-semibold text-gray-900 dark:text-white">
-                  {stats.highResourceServers.length} Alert{stats.highResourceServers.length > 1 ? 's' : ''}
+              <div className="flex items-center space-x-3 mb-3">
+                <FaExclamationTriangle className="text-yellow-500 text-3xl pulse-icon-aggressive" />
+                <span className="text-xl font-bold text-gray-900 dark:text-white">
+                  {stats.highResourceServers.length} Server{stats.highResourceServers.length > 1 ? 's' : ''} Need Attention
                 </span>
               </div>
               <div className="space-y-2 max-h-32 overflow-y-auto">
                 {stats.highResourceServers.map((server, idx) => (
                   <div 
                     key={idx} 
-                    className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-700 rounded px-3 py-2"
+                    className="bg-red-50 dark:bg-red-900/30 border-2 border-red-300 dark:border-red-600 rounded-lg px-3 py-2 alert-item-pulse"
                   >
-                    <div className="font-medium text-gray-900 dark:text-white text-sm">{server.name}</div>
-                    <div className="text-xs text-yellow-700 dark:text-yellow-400">
+                    <div className="font-bold text-gray-900 dark:text-white text-sm">{server.name}</div>
+                    <div className="text-xs font-semibold text-red-700 dark:text-red-300">
                       {server.alerts.map((alert, i) => (
                         <span key={i}>
-                          {alert} &gt;80%{i < server.alerts.length - 1 ? ', ' : ''}
+                          ⚠️ {alert} &gt;80%{i < server.alerts.length - 1 ? ' • ' : ''}
                         </span>
                       ))}
                     </div>
@@ -609,8 +636,9 @@ const Dashboard = () => {
         ))}
       </div>
 
-      {/* Add fadeIn animation */}
+      {/* ENHANCED AGGRESSIVE CSS ANIMATIONS */}
       <style jsx>{`
+        /* Fade In Animation */
         @keyframes fadeIn {
           from {
             opacity: 0;
@@ -624,6 +652,185 @@ const Dashboard = () => {
         
         .animate-fadeIn {
           animation: fadeIn 0.3s ease-in-out;
+        }
+
+        /* AGGRESSIVE Border Pulse - MUCH STRONGER */
+        @keyframes alertBorderPulse {
+          0% {
+            border-color: rgb(239, 68, 68); /* red-500 */
+            border-width: 3px;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7),
+                        0 0 30px 5px rgba(239, 68, 68, 0.4);
+          }
+          50% {
+            border-color: rgb(220, 38, 38); /* red-600 */
+            border-width: 4px;
+            box-shadow: 0 0 25px 8px rgba(239, 68, 68, 0.6),
+                        0 0 50px 15px rgba(239, 68, 68, 0.3);
+          }
+          100% {
+            border-color: rgb(239, 68, 68); /* red-500 */
+            border-width: 3px;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.7),
+                        0 0 30px 5px rgba(239, 68, 68, 0.4);
+          }
+        }
+
+        /* Dark mode border pulse */
+        @keyframes alertBorderPulseDark {
+          0% {
+            border-color: rgb(239, 68, 68); /* red-500 */
+            border-width: 3px;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8),
+                        0 0 35px 8px rgba(239, 68, 68, 0.5);
+          }
+          50% {
+            border-color: rgb(220, 38, 38); /* red-600 */
+            border-width: 4px;
+            box-shadow: 0 0 30px 10px rgba(239, 68, 68, 0.7),
+                        0 0 60px 20px rgba(239, 68, 68, 0.4);
+          }
+          100% {
+            border-color: rgb(239, 68, 68); /* red-500 */
+            border-width: 3px;
+            box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.8),
+                        0 0 35px 8px rgba(239, 68, 68, 0.5);
+          }
+        }
+
+        .alert-pulse-border {
+          animation: alertBorderPulse 1.5s ease-in-out infinite;
+        }
+
+        .dark .alert-pulse-border {
+          animation: alertBorderPulseDark 1.5s ease-in-out infinite;
+        }
+
+        /* Background Red Tint Pulse */
+        @keyframes backgroundPulse {
+          0% {
+            background-color: rgba(254, 242, 242, 0.3); /* red-50 with opacity */
+          }
+          50% {
+            background-color: rgba(254, 226, 226, 0.5); /* red-100 with opacity */
+          }
+          100% {
+            background-color: rgba(254, 242, 242, 0.3);
+          }
+        }
+
+        @keyframes backgroundPulseDark {
+          0% {
+            background-color: rgba(127, 29, 29, 0.2); /* red-900 with opacity */
+          }
+          50% {
+            background-color: rgba(153, 27, 27, 0.3); /* red-900 darker with opacity */
+          }
+          100% {
+            background-color: rgba(127, 29, 29, 0.2);
+          }
+        }
+
+        .alert-background-pulse {
+          animation: backgroundPulse 1.5s ease-in-out infinite;
+        }
+
+        .dark .alert-background-pulse {
+          animation: backgroundPulseDark 1.5s ease-in-out infinite;
+        }
+
+        /* DRAMATIC Icon Pulse - Scale to 1.3x */
+        @keyframes iconPulseAggressive {
+          0% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.3);
+            filter: drop-shadow(0 0 8px rgba(234, 179, 8, 0.8));
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+
+        .pulse-icon-aggressive {
+          animation: iconPulseAggressive 1.5s ease-in-out infinite;
+        }
+
+        /* Large Badge Pulse */
+        @keyframes badgePulse {
+          0% {
+            transform: scale(1);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+          }
+          50% {
+            transform: scale(1.1);
+            box-shadow: 0 20px 40px -5px rgba(239, 68, 68, 0.6),
+                        0 0 30px 5px rgba(239, 68, 68, 0.4);
+          }
+          100% {
+            transform: scale(1);
+            box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.3);
+          }
+        }
+
+        .alert-badge-pulse {
+          animation: badgePulse 1.5s ease-in-out infinite;
+        }
+
+        /* Aggressive Ping for Outer Ring */
+        @keyframes pingAggressive {
+          0% {
+            transform: scale(1);
+            opacity: 0.75;
+          }
+          50% {
+            transform: scale(1.3);
+            opacity: 0.5;
+          }
+          100% {
+            transform: scale(1.6);
+            opacity: 0;
+          }
+        }
+
+        .animate-ping-aggressive {
+          animation: pingAggressive 1s cubic-bezier(0, 0, 0.2, 1) infinite;
+        }
+
+        /* Alert Label Pulse */
+        @keyframes labelPulse {
+          0% {
+            opacity: 1;
+          }
+          50% {
+            opacity: 0.8;
+            box-shadow: 0 0 15px 2px rgba(239, 68, 68, 0.5);
+          }
+          100% {
+            opacity: 1;
+          }
+        }
+
+        .alert-label-pulse {
+          animation: labelPulse 1.5s ease-in-out infinite;
+        }
+
+        /* Alert Item Subtle Pulse */
+        @keyframes itemPulse {
+          0% {
+            transform: scale(1);
+          }
+          50% {
+            transform: scale(1.02);
+          }
+          100% {
+            transform: scale(1);
+          }
+        }
+
+        .alert-item-pulse {
+          animation: itemPulse 2s ease-in-out infinite;
         }
       `}</style>
     </div>
