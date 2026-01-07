@@ -444,15 +444,23 @@ class DLLManager {
           console.log(`\n   📁 Additional Path ${i + 1}/${additionalPaths.length}: ${additionalVersionPath}`);
           
           try {
+            // Ensure the DLL folder exists
             const ensureAdditionalFolderCmd = `if (!(Test-Path '${additionalDllFolder}')) { New-Item -ItemType Directory -Path '${additionalDllFolder}' -Force | Out-Null }`;
             await sshService.executeCommand(targetServerConfig, ensureAdditionalFolderCmd);
             
+            // Remove old version folder if it exists
             const removeOldAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { Remove-Item -Path '${additionalVersionPath}' -Recurse -Force }`;
             await sshService.executeCommand(targetServerConfig, removeOldAdditionalCmd);
             
+            // Create the version folder
+            const ensureVersionFolderCmd = `if (!(Test-Path '${additionalVersionPath}')) { New-Item -ItemType Directory -Path '${additionalVersionPath}' -Force | Out-Null }`;
+            await sshService.executeCommand(targetServerConfig, ensureVersionFolderCmd);
+            
+            // Copy the contents
             const copyCmd = `Copy-Item -Path '${targetVersionPath}\\*' -Destination '${additionalVersionPath}' -Recurse -Force`;
             await sshService.executeCommand(targetServerConfig, copyCmd);
             
+            // Verify the copy
             const verifyAdditionalCmd = `if (Test-Path '${additionalVersionPath}') { (Get-ChildItem -Path '${additionalVersionPath}' -File).Count } else { Write-Output "0" }`;
             const fileCount = await sshService.executeCommand(targetServerConfig, verifyAdditionalCmd);
             
@@ -700,6 +708,10 @@ class DLLManager {
     });
 
     return details;
+  }
+
+  async getDLLDetails(dllName) {
+    return this.getFolderDetails(dllName);
   }
 }
 
