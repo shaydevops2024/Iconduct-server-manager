@@ -5,7 +5,10 @@ import { FaRocket, FaServer, FaCheckCircle, FaExclamationTriangle, FaSpinner, Fa
 import axios from 'axios';
 import { useLocation, useSearchParams } from 'react-router-dom';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Use empty string for production (relies on nginx proxy), falls back to localhost for dev
+const API_URL = process.env.REACT_APP_API_URL !== undefined
+  ? (process.env.REACT_APP_API_URL || '')  // Empty string for relative URLs
+  : 'http://localhost:5000';  // Development fallback
 
 const DeploySSL = () => {
   const location = useLocation();

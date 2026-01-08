@@ -5,7 +5,10 @@ import { useNavigate } from 'react-router-dom';
 import { FaLock, FaUnlock, FaKey, FaCopy, FaCheckCircle, FaExclamationTriangle, FaSpinner, FaTimes, FaHome, FaServer } from 'react-icons/fa';
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Use empty string for production (relies on nginx proxy), falls back to localhost for dev
+const API_URL = process.env.REACT_APP_API_URL !== undefined
+  ? (process.env.REACT_APP_API_URL || '')  // Empty string for relative URLs
+  : 'http://localhost:5000';  // Development fallback
 
 const Encryption = () => {
   const navigate = useNavigate();
@@ -83,9 +86,48 @@ const Encryption = () => {
 
   const handleCopyToClipboard = () => {
     if (modalData?.result) {
-      navigator.clipboard.writeText(modalData.result);
-      setCopiedToClipboard(true);
-      setTimeout(() => setCopiedToClipboard(false), 2000);
+      // Try modern clipboard API first (works on HTTPS and localhost)
+      if (navigator.clipboard && window.isSecureContext) {
+        navigator.clipboard.writeText(modalData.result)
+          .then(() => {
+            setCopiedToClipboard(true);
+            setTimeout(() => setCopiedToClipboard(false), 2000);
+          })
+          .catch(err => {
+            console.error('Clipboard API failed:', err);
+            // Fall back to old method
+            fallbackCopyToClipboard(modalData.result);
+          });
+      } else {
+        // Use fallback method for HTTP
+        fallbackCopyToClipboard(modalData.result);
+      }
+    }
+  };
+
+  const fallbackCopyToClipboard = (text) => {
+    // Create a temporary textarea element
+    const textArea = document.createElement('textarea');
+    textArea.value = text;
+    textArea.style.position = 'fixed';
+    textArea.style.left = '-999999px';
+    textArea.style.top = '-999999px';
+    document.body.appendChild(textArea);
+    textArea.focus();
+    textArea.select();
+    
+    try {
+      // Use the older execCommand method (works over HTTP)
+      const successful = document.execCommand('copy');
+      if (successful) {
+        setCopiedToClipboard(true);
+        setTimeout(() => setCopiedToClipboard(false), 2000);
+      }
+    } catch (err) {
+      console.error('Fallback copy failed:', err);
+      alert('Copy failed. Please manually select and copy the text.');
+    } finally {
+      document.body.removeChild(textArea);
     }
   };
 

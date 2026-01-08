@@ -4,7 +4,10 @@ import React, { useState, useEffect } from 'react';
 import { FaLock, FaUpload, FaCheckCircle, FaExclamationTriangle, FaKey, FaFileArchive, FaTrash, FaInfoCircle } from 'react-icons/fa';
 import axios from 'axios';
 
-const API_URL = process.env.REACT_APP_API_URL || 'http://localhost:5000';
+// Use empty string for production (relies on nginx proxy), falls back to localhost for dev
+const API_URL = process.env.REACT_APP_API_URL !== undefined
+  ? (process.env.REACT_APP_API_URL || '')  // Empty string for relative URLs
+  : 'http://localhost:5000';  // Development fallback
 
 const CreatePFX = () => {
   const [crtFile, setCrtFile] = useState(null);
