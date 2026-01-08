@@ -134,6 +134,7 @@ const Encryption = () => {
   const closeModal = () => {
     setShowModal(false);
     setCopiedToClipboard(false);
+    setInputText(''); // Clear the input text for next operation
   };
 
   const handleBackToDashboard = () => {
