@@ -4,6 +4,7 @@ const { Client } = require('ssh2');
 const fs = require('fs');
 const path = require('path');
 const net = require('net');
+const crypto = require('crypto');
 
 class SSHService {
   constructor() {
@@ -62,7 +63,77 @@ class SSHService {
   }
 
   /**
+   * Execute a PowerShell script by uploading it and running it remotely
+   * This avoids command line length limits
+   */
+  async executeScript(serverConfig, scriptContent, retries = 3) {
+    let lastError;
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const result = await this._executeScriptOnce(serverConfig, scriptContent);
+        return result;
+      } catch (error) {
+        lastError = error;
+        console.log(`Script execution attempt ${attempt}/${retries} failed for ${serverConfig.name}: ${error.message}`);
+        if (attempt < retries) {
+          await new Promise(resolve => setTimeout(resolve, 2000));
+        }
+      }
+    }
+    throw lastError;
+  }
+
+  /**
+   * Internal method to execute a script once by uploading it
+   */
+  async _executeScriptOnce(serverConfig, scriptContent) {
+    const scriptName = `upgrade-script-${crypto.randomBytes(8).toString('hex')}.ps1`;
+    const remotePath = `C:\\Windows\\Temp\\${scriptName}`;
+    const localTempPath = path.join(require('os').tmpdir(), scriptName);
+
+    try {
+      // Write script to local temp file
+      fs.writeFileSync(localTempPath, scriptContent, 'utf8');
+
+      // Upload script to server
+      await this.uploadFile(serverConfig, localTempPath, remotePath);
+
+      // Execute the script
+      const executeCommand = `powershell.exe -NoProfile -ExecutionPolicy Bypass -File "${remotePath}"`;
+      const result = await this.executeCommand(serverConfig, executeCommand);
+
+      // Delete remote script
+      const cleanupCommand = `Remove-Item -Path "${remotePath}" -Force -ErrorAction SilentlyContinue`;
+      await this.executeCommand(serverConfig, cleanupCommand).catch(() => {
+        console.log('Warning: Could not delete remote script file');
+      });
+
+      // Delete local temp file
+      try {
+        fs.unlinkSync(localTempPath);
+      } catch (e) {
+        console.log('Warning: Could not delete local temp script file');
+      }
+
+      return result;
+
+    } catch (error) {
+      // Cleanup on error
+      try {
+        if (fs.existsSync(localTempPath)) {
+          fs.unlinkSync(localTempPath);
+        }
+      } catch (e) {
+        // Ignore cleanup errors
+      }
+
+      throw error;
+    }
+  }
+
+  /**
    * Execute a PowerShell command on a Windows server via SSH with retries
+   * Use this for short commands only (< 2000 characters)
    */
   async executeCommand(serverConfig, command, retries = 3) {
     let lastError;
@@ -82,7 +153,7 @@ class SSHService {
   }
 
   /**
-   * Internal method to execute a command once
+   * Internal method to execute a command once with real-time output
    */
   _executeCommandOnce(serverConfig, command) {
     return new Promise((resolve, reject) => {
@@ -93,14 +164,10 @@ class SSHService {
       conn.on('ready', () => {
         console.log(`Executing command on ${serverConfig.name} (${serverConfig.host})`);
 
-        // Escape the command for cmd.exe + PowerShell
-        const escapedCommand = command
-          .replace(/\\/g, '\\\\')  // Escape backslashes
-          .replace(/"/g, '\\"');    // Escape double quotes for cmd.exe
+        // For short commands, execute directly
+        const psCommand = `powershell.exe -NoProfile -Command "& {${command}}"`;
 
-        const psCommand = `powershell.exe -NoProfile -Command "& {${escapedCommand}}"`;
-
-        console.log(`Command length: ${psCommand.length}`);
+        console.log(`Command length: ${command.length} characters`);
 
         conn.exec(psCommand, (err, stream) => {
           if (err) {
@@ -120,9 +187,26 @@ class SSHService {
               resolve(output);
             }
           }).on('data', (data) => {
-            output += data.toString();
+            const chunk = data.toString();
+            output += chunk;
+            // Log output in real-time for visibility
+            const lines = chunk.split('\n');
+            lines.forEach(line => {
+              const trimmed = line.trim();
+              if (trimmed) {
+                console.log(`[${serverConfig.name}] ${trimmed}`);
+              }
+            });
           }).stderr.on('data', (data) => {
-            errorOutput += data.toString();
+            const chunk = data.toString();
+            errorOutput += chunk;
+            const lines = chunk.split('\n');
+            lines.forEach(line => {
+              const trimmed = line.trim();
+              if (trimmed) {
+                console.error(`[${serverConfig.name}] ERROR: ${trimmed}`);
+              }
+            });
           });
         });
       }).on('error', (err) => {
@@ -138,7 +222,7 @@ class SSHService {
       keepaliveInterval: 10000,
       keepaliveCountMax: 3,
       algorithms: { serverHostKey: ['ssh-rsa', 'ssh-dss', 'ecdsa-sha2-nistp256', 'ecdsa-sha2-nistp384', 'ecdsa-sha2-nistp521'] },
-      hostVerifier: () => true,  // ← ADD THIS LINE (disables host verification)
+      hostVerifier: () => true,
     });
     });
   }
@@ -262,9 +346,7 @@ class SSHService {
       const conn = new Client();
 
       conn.on('ready', () => {
-        console.log(`📤 Uploading file to ${serverConfig.name}...`);
-        console.log(`   Local: ${localPath}`);
-        console.log(`   Remote: ${remotePath}`);
+        console.log(`📤 Uploading script to ${serverConfig.name}...`);
 
         conn.sftp((err, sftp) => {
           if (err) {
@@ -307,7 +389,7 @@ class SSHService {
 
           writeStream.on('close', () => {
             conn.end();
-            console.log(`✅ Uploaded ${bytesSent} bytes successfully`);
+            console.log(`✅ Uploaded script (${bytesSent} bytes)`);
             resolve(remotePath);
           });
 

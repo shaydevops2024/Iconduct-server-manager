@@ -2,7 +2,7 @@
 
 import React from 'react';
 import { Link, useLocation } from 'react-router-dom';
-import { FaServer, FaKey, FaFileCode, FaSun, FaMoon, FaLock, FaRocket } from 'react-icons/fa';
+import { FaServer, FaKey, FaFileCode, FaSun, FaMoon, FaLock, FaRocket, FaCloudUploadAlt } from 'react-icons/fa';
 import { useTheme } from '../context/ThemeContext';
 
 const Layout = ({ children }) => {
@@ -15,6 +15,7 @@ const Layout = ({ children }) => {
     { path: '/dll-manager', label: 'DLL Manager', icon: FaFileCode },
     { path: '/create-pfx', label: 'Create PFX', icon: FaLock },
     { path: '/deploy-ssl', label: 'Deploy SSL', icon: FaRocket },
+    { path: '/automated-upgrade', label: 'Automated Upgrade', icon: FaCloudUploadAlt },
   ];
 
   return (
@@ -50,7 +51,7 @@ const Layout = ({ children }) => {
       {/* Navigation */}
       <nav className="bg-white dark:bg-gray-800 border-b border-gray-200 dark:border-gray-700 shadow-sm transition-colors duration-200">
         <div className="container mx-auto px-4">
-          <div className="flex space-x-1">
+          <div className="flex space-x-1 overflow-x-auto">
             {navItems.map((item) => {
               const Icon = item.icon;
               const isActive = location.pathname === item.path;
@@ -59,7 +60,7 @@ const Layout = ({ children }) => {
                 <Link
                   key={item.path}
                   to={item.path}
-                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors
+                  className={`flex items-center space-x-2 px-6 py-4 font-medium transition-colors whitespace-nowrap
                     ${isActive 
                       ? 'text-orange-500 border-b-2 border-orange-500 bg-orange-50 dark:bg-orange-900/20' 
                       : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white hover:bg-gray-50 dark:hover:bg-gray-700'

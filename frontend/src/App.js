@@ -8,6 +8,7 @@ import Encryption from './pages/Encryption';
 import DLLManager from './pages/DLLManager';
 import CreatePFX from './pages/CreatePFX';
 import DeploySSL from './pages/DeploySSL';
+import AutomatedUpgrade from './pages/AutomatedUpgrade';
 import { ThemeProvider } from './context/ThemeContext';
 
 function App() {
@@ -21,6 +22,7 @@ function App() {
             <Route path="/dll-manager" element={<DLLManager />} />
             <Route path="/create-pfx" element={<CreatePFX />} />
             <Route path="/deploy-ssl" element={<DeploySSL />} />
+            <Route path="/automated-upgrade" element={<AutomatedUpgrade />} />
           </Routes>
         </Layout>
       </Router>
