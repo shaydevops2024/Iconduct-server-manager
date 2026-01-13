@@ -16,6 +16,31 @@ class S3UpgradeService {
   }
 
   /**
+   * Generate pre-signed URL for direct upload from frontend to S3
+   */
+  async getUploadUrl(fileName, fileType, componentType) {
+    const timestamp = Date.now();
+    const random = crypto.randomBytes(8).toString('hex');
+    const sanitizedName = fileName.replace(/[^a-zA-Z0-9.-]/g, '_');
+    const key = `${this.UPGRADE_PREFIX}${componentType}/${timestamp}-${random}-${sanitizedName}`;
+
+    const command = new PutObjectCommand({
+      Bucket: this.S3_BUCKET,
+      Key: key,
+      ContentType: fileType || 'application/zip'
+    });
+
+    const uploadUrl = await getSignedUrl(this.s3Client, command, { expiresIn: 3600 }); // 1 hour
+
+    console.log(`✅ Generated upload URL for: ${key}`);
+
+    return {
+      uploadUrl: uploadUrl,
+      key: key
+    };
+  }
+
+  /**
    * Upload file directly to S3 from backend
    */
   async uploadFile(filePath, fileName, componentType) {
@@ -83,22 +108,49 @@ class S3UpgradeService {
    */
   async cleanupUpgradeFiles(s3Keys) {
     const deletePromises = [];
+    const filesToDelete = [];
 
     if (s3Keys.backend) {
+      filesToDelete.push({ type: 'backend', key: s3Keys.backend });
       deletePromises.push(this.deleteFile(s3Keys.backend));
     }
     if (s3Keys.oldUI) {
+      filesToDelete.push({ type: 'oldUI', key: s3Keys.oldUI });
       deletePromises.push(this.deleteFile(s3Keys.oldUI));
     }
     if (s3Keys.newUI) {
+      filesToDelete.push({ type: 'newUI', key: s3Keys.newUI });
       deletePromises.push(this.deleteFile(s3Keys.newUI));
     }
     if (s3Keys.apiManagement) {
+      filesToDelete.push({ type: 'apiManagement', key: s3Keys.apiManagement });
       deletePromises.push(this.deleteFile(s3Keys.apiManagement));
     }
 
-    await Promise.allSettled(deletePromises);
-    console.log('✅ Cleaned up all S3 upgrade files');
+    if (deletePromises.length === 0) {
+      console.log('ℹ️  No S3 files to clean up');
+      return;
+    }
+
+    console.log(`🗑️  Cleaning up ${deletePromises.length} file(s) from S3...`);
+    
+    const results = await Promise.allSettled(deletePromises);
+    
+    let successCount = 0;
+    let failCount = 0;
+    
+    results.forEach((result, index) => {
+      const fileInfo = filesToDelete[index];
+      if (result.status === 'fulfilled') {
+        successCount++;
+        console.log(`  ✅ Deleted ${fileInfo.type}: ${fileInfo.key}`);
+      } else {
+        failCount++;
+        console.error(`  ❌ Failed to delete ${fileInfo.type}: ${result.reason}`);
+      }
+    });
+    
+    console.log(`✅ S3 cleanup complete: ${successCount} succeeded, ${failCount} failed`);
   }
 }
 

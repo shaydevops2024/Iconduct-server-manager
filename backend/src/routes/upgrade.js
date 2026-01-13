@@ -2,12 +2,16 @@
 
 const express = require('express');
 const router = express.Router();
+const multer = require('multer');
+const sshService = require('../services/sshService');
 const upgradeService = require('../services/upgradeService');
 const s3UpgradeService = require('../services/s3UpgradeService');
-const sshService = require('../services/sshService');
+
+// Configure multer for memory storage
+const upload = multer({ storage: multer.memoryStorage() });
 
 /**
- * Get list of available backend servers
+ * Get list of available servers for upgrade
  */
 router.get('/servers', async (req, res) => {
   try {
@@ -15,13 +19,13 @@ router.get('/servers', async (req, res) => {
     
     // Filter to only backend servers (exclude frontend)
     const backendServers = servers.filter(server => server.group !== 'frontend');
-    
+
     res.json({
       success: true,
       servers: backendServers
     });
   } catch (error) {
-    console.error('Error getting servers:', error);
+    console.error('Error fetching servers:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -30,81 +34,25 @@ router.get('/servers', async (req, res) => {
 });
 
 /**
- * Upload file to S3 (direct upload from backend)
- */
-router.post('/upload-to-s3', async (req, res) => {
-  try {
-    const { fileName, fileType, fileBuffer } = req.body;
-    
-    if (!fileName || !fileType || !fileBuffer) {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing required fields: fileName, fileType, fileBuffer'
-      });
-    }
-
-    // Convert base64 to buffer
-    const buffer = Buffer.from(fileBuffer, 'base64');
-    
-    // Upload to S3
-    const s3Key = await s3UpgradeService.uploadFile(buffer, fileName, fileType);
-    
-    res.json({
-      success: true,
-      s3Key: s3Key
-    });
-  } catch (error) {
-    console.error('Error uploading to S3:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
-
-/**
- * Get pre-signed URL for direct upload to S3 from browser
+ * Get pre-signed S3 upload URL
  */
 router.post('/get-upload-url', async (req, res) => {
   try {
     const { fileName, fileType, componentType } = req.body;
-    
-    if (!fileName || !fileType || !componentType) {
+
+    if (!fileName || !componentType) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: fileName, fileType, componentType'
+        error: 'Missing required fields: fileName, componentType'
       });
     }
 
-    // Generate S3 key
-    const timestamp = Date.now();
-    const randomString = Math.random().toString(36).substring(2, 15);
-    const s3Key = `upgrades/${componentType}/${timestamp}-${randomString}-${fileName}`;
-    
-    // Generate pre-signed URL for upload
-    const { S3Client, PutObjectCommand } = require('@aws-sdk/client-s3');
-    const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-    
-    const s3Client = new S3Client({
-      region: process.env.AWS_REGION || 'eu-central-1',
-      credentials: {
-        accessKeyId: process.env.AWS_ACCESS_KEY_ID,
-        secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY
-      }
-    });
-    
-    const command = new PutObjectCommand({
-      Bucket: process.env.S3_BUCKET_NAME || 'shayg-test-grafana',
-      Key: s3Key,
-      ContentType: fileType
-    });
-    
-    const uploadUrl = await getSignedUrl(s3Client, command, { expiresIn: 3600 });
-    
+    const result = await s3UpgradeService.getUploadUrl(fileName, fileType, componentType);
+
     res.json({
       success: true,
-      uploadUrl: uploadUrl,
-      s3Key: s3Key
+      uploadUrl: result.uploadUrl,
+      s3Key: result.key
     });
   } catch (error) {
     console.error('Error generating upload URL:', error);
@@ -121,7 +69,7 @@ router.post('/get-upload-url', async (req, res) => {
 router.post('/delete-upload', async (req, res) => {
   try {
     const { s3Key } = req.body;
-    
+
     if (!s3Key) {
       return res.status(400).json({
         success: false,
@@ -130,13 +78,13 @@ router.post('/delete-upload', async (req, res) => {
     }
 
     await s3UpgradeService.deleteFile(s3Key);
-    
+
     res.json({
       success: true,
-      message: 'File deleted from S3'
+      message: 'File deleted successfully'
     });
   } catch (error) {
-    console.error('Error deleting from S3:', error);
+    console.error('Error deleting file:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -145,23 +93,29 @@ router.post('/delete-upload', async (req, res) => {
 });
 
 /**
- * Execute upgrade on a server
+ * Execute upgrade
  */
 router.post('/execute', async (req, res) => {
   try {
     const { serverName, s3Keys } = req.body;
-    
-    if (!serverName || !s3Keys) {
+
+    if (!serverName) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required fields: serverName, s3Keys'
+        error: 'Missing required field: serverName'
       });
     }
 
-    // Find server config
-    const servers = sshService.getAllServers();
-    const serverConfig = servers.find(s => s.name === serverName);
-    
+    if (!s3Keys || typeof s3Keys !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or invalid s3Keys'
+      });
+    }
+
+    // Get server config from sshService
+    const allServers = sshService.getAllServers();
+    const serverConfig = allServers.find(s => s.name === serverName);
     if (!serverConfig) {
       return res.status(404).json({
         success: false,
@@ -169,49 +123,138 @@ router.post('/execute', async (req, res) => {
       });
     }
 
-    console.log(`Starting upgrade for server: ${serverName}`);
-    console.log('S3 Keys:', s3Keys);
+    console.log(`Starting upgrade for ${serverName}`);
 
     // Execute upgrade
     const result = await upgradeService.executeUpgrade(serverConfig, s3Keys);
-    
-    // Cleanup S3 files after successful upgrade
-    try {
-      const keysToClean = Object.values(s3Keys).filter(key => key);
-      if (keysToClean.length > 0) {
-        await s3UpgradeService.cleanupUpgradeFiles(keysToClean);
-        console.log('Cleaned up S3 files after successful upgrade');
-      }
-    } catch (cleanupError) {
-      console.error('Error cleaning up S3 files:', cleanupError);
-      // Don't fail the upgrade if cleanup fails
-    }
-    
+
     res.json({
       success: true,
       result: result
     });
+
   } catch (error) {
-    console.error('Error executing upgrade:', error);
-    
-    // Try to cleanup S3 files even if upgrade failed
-    try {
-      const { s3Keys } = req.body;
-      if (s3Keys) {
-        const keysToClean = Object.values(s3Keys).filter(key => key);
-        if (keysToClean.length > 0) {
-          await s3UpgradeService.cleanupUpgradeFiles(keysToClean);
-          console.log('Cleaned up S3 files after failed upgrade');
-        }
-      }
-    } catch (cleanupError) {
-      console.error('Error cleaning up S3 files:', cleanupError);
-    }
-    
+    console.error('Upgrade execution error:', error);
     res.status(500).json({
       success: false,
       error: error.message || 'Upgrade failed',
       phases: error.phases || []
+    });
+  }
+});
+
+/**
+ * Get upgrade status (for live polling)
+ */
+router.get('/status/:serverName', async (req, res) => {
+  try {
+    const { serverName } = req.params;
+    
+    const status = upgradeService.getUpgradeStatus(serverName);
+    
+    if (!status) {
+      return res.json({
+        success: true,
+        status: 'idle',
+        phases: []
+      });
+    }
+    
+    res.json({
+      success: true,
+      ...status
+    });
+  } catch (error) {
+    console.error('Error getting upgrade status:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get upgrade logs for a server (most recent)
+ */
+router.get('/logs/:serverName', async (req, res) => {
+  try {
+    const { serverName } = req.params;
+    
+    const logs = await upgradeService.getUpgradeLogs(serverName);
+    
+    res.json({
+      success: true,
+      logs: logs
+    });
+  } catch (error) {
+    console.error('Error getting logs:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * List all upgrade logs
+ */
+router.get('/logs', async (req, res) => {
+  try {
+    const logsList = await upgradeService.listAllLogs();
+    
+    res.json({
+      success: true,
+      logs: logsList
+    });
+  } catch (error) {
+    console.error('Error listing logs:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get specific log file content
+ */
+router.get('/logs/file/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    const logContent = await upgradeService.getLogContent(filename);
+    
+    res.json({
+      success: true,
+      logs: logContent
+    });
+  } catch (error) {
+    console.error('Error getting log file:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Delete log file
+ */
+router.delete('/logs/:filename', async (req, res) => {
+  try {
+    const { filename } = req.params;
+    
+    await upgradeService.deleteLog(filename);
+    
+    res.json({
+      success: true,
+      message: 'Log deleted successfully'
+    });
+  } catch (error) {
+    console.error('Error deleting log:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
     });
   }
 });

@@ -15,6 +15,7 @@ if ($serverType -eq 'backend') {
 
 try {
     $deployedCount = 0
+    $deployedFolders = @()
     
     Write-Host "Deploying new version..."
     
@@ -27,10 +28,15 @@ try {
         # Move folder to production
         Move-Item -Path $tempFolder.FullName -Destination $destPath -Force
         Write-Host "Moved: $($tempFolder.Name) to $productionPath"
+        $deployedFolders += $tempFolder.Name
         $deployedCount++
     }
     
     Write-Host "`nDeployed $deployedCount folder(s) to $productionPath"
+    
+    # Output folder names as JSON for parsing
+    Write-Host "DEPLOYED_FOLDERS_JSON:"
+    Write-Host ($deployedFolders | ConvertTo-Json -Compress)
 }
 catch {
     Write-Error "Failed to deploy new version: $_"

@@ -5,8 +5,7 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN apk add --no-cache openssl
+# Install npm packages only (Node 18 Alpine already includes OpenSSL)
 RUN npm install --production
 
 # Copy application files

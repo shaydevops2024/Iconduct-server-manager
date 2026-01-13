@@ -104,13 +104,13 @@ try {
     $scheduler02 = $serviceNames | Where-Object { $_ -like "*Service*" -and $_ -like "*02*" } | Select-Object -First 1
     
     if ($scheduler01) {
-        if (Start-ServiceSafe -serviceName $scheduler01 -sleepSeconds 30) {
+        if (Start-ServiceSafe -serviceName $scheduler01 -sleepSeconds 5) {
             $startedCount++
         }
     }
     
     if ($scheduler02) {
-        if (Start-ServiceSafe -serviceName $scheduler02 -sleepSeconds 30) {
+        if (Start-ServiceSafe -serviceName $scheduler02 -sleepSeconds 5) {
             $startedCount++
         }
     }
@@ -119,7 +119,7 @@ try {
     Write-Host "`n=== Starting DataBus ==="
     $databusService = Find-ServiceByPattern @("databus")
     if ($databusService) {
-        if (Start-ServiceSafe -serviceName $databusService -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $databusService -sleepSeconds 3) {
             $startedCount++
         }
     }
@@ -128,7 +128,7 @@ try {
     Write-Host "`n=== Starting License Service ==="
     $licenseService = Find-ServiceByPattern @("license")
     if ($licenseService) {
-        if (Start-ServiceSafe -serviceName $licenseService -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $licenseService -sleepSeconds 3) {
             $startedCount++
         }
     }
