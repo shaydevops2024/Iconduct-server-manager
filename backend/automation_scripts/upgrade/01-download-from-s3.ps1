@@ -2,80 +2,49 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
+# Template variable (injected at runtime)
 $backendUrl = '{{BACKEND_URL}}'
-$oldUIUrl = '{{OLD_UI_URL}}'
-$newUIUrl = '{{NEW_UI_URL}}'
-$apiMgmtUrl = '{{API_MGMT_URL}}'
 
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $downloadPath = "D:\IConduct-Upload"
-} else {
-    $downloadPath = "C:\inetpub\wwwroot\IConduct-Upload"
-}
+# Backend-only download path
+$downloadPath = "D:\IConduct-Upload"
 
 try {
-    # Create download folder
+
+    Write-Host "Starting backend artifact download phase 1"
+
+    # Ensure download folder exists
     if (-not (Test-Path $downloadPath)) {
         New-Item -ItemType Directory -Path $downloadPath -Force | Out-Null
         Write-Host "Created download folder: $downloadPath"
     } else {
-        # Clean existing files
         Remove-Item -Path "$downloadPath\*" -Recurse -Force -ErrorAction SilentlyContinue
         Write-Host "Cleaned download folder: $downloadPath"
     }
-    
-    $downloadedCount = 0
-    
-    # Function to download with progress
-    function Download-FileWithProgress {
-        param($Url, $OutFile, $Name)
-        
-        Write-Host "Downloading $Name from S3..."
-        
-        # Use .NET WebClient for download
-        $webClient = New-Object System.Net.WebClient
-        
-        # Download synchronously
-        $webClient.DownloadFile($Url, $OutFile)
-        
-        $size = (Get-Item $OutFile).Length / 1MB
-        Write-Host "Downloaded $Name ($([math]::Round($size, 2)) MB)"
+
+    # Validate BACKEND_URL
+    if (-not $backendUrl -or $backendUrl -eq '') {
+        throw "BACKEND_URL is empty or not defined"
     }
-    
-    # Download based on server type
-    if ($serverType -eq 'backend') {
-        # Backend server - only download backend.zip
-        if ($backendUrl -and $backendUrl -ne '') {
-            $backendPath = Join-Path $downloadPath "backend.zip"
-            Download-FileWithProgress -Url $backendUrl -OutFile $backendPath -Name "backend.zip"
-            $downloadedCount++
-        }
-    } else {
-        # Frontend server - download UI files
-        if ($oldUIUrl -and $oldUIUrl -ne '') {
-            $oldUIPath = Join-Path $downloadPath "oldUI.zip"
-            Download-FileWithProgress -Url $oldUIUrl -OutFile $oldUIPath -Name "oldUI.zip"
-            $downloadedCount++
-        }
-        
-        if ($newUIUrl -and $newUIUrl -ne '') {
-            $newUIPath = Join-Path $downloadPath "newUI.zip"
-            Download-FileWithProgress -Url $newUIUrl -OutFile $newUIPath -Name "newUI.zip"
-            $downloadedCount++
-        }
-        
-        if ($apiMgmtUrl -and $apiMgmtUrl -ne '') {
-            $apiMgmtPath = Join-Path $downloadPath "apiManagement.zip"
-            Download-FileWithProgress -Url $apiMgmtUrl -OutFile $apiMgmtPath -Name "apiManagement.zip"
-            $downloadedCount++
-        }
+
+    if ($backendUrl -notmatch '^https?://') {
+        throw "BACKEND_URL must be a full http(s) URL. Actual value: $backendUrl"
     }
-    
-    Write-Host "Downloaded $downloadedCount file(s) from S3 to $downloadPath"
+
+    Write-Host "Downloading backend artifact from S3:"
+    Write-Host $backendUrl
+
+    $destination = Join-Path $downloadPath "backend.zip"
+
+    # Download from S3
+    $webClient = New-Object System.Net.WebClient
+    $webClient.DownloadFile($backendUrl, $destination)
+
+    $sizeMB = (Get-Item $destination).Length / 1MB
+    Write-Host "Download completed: backend.zip ($([math]::Round($sizeMB, 2)) MB)"
+    Write-Host "File saved to: $destination"
+
 }
 catch {
-    Write-Error "Failed to download files from S3: $_"
+    Write-Error "Failed to download backend artifact from S3: $_"
     exit 1
 }

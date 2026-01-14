@@ -2,14 +2,8 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-} else {
-    $tempPath = "C:\inetpub\wwwroot\Temp"
-}
+# Backend only - fixed temp path
+$tempPath = "D:\Temp"
 
 try {
     Write-Host "Cleaning temp folder: $tempPath"
@@ -59,6 +53,7 @@ try {
     New-Item -ItemType Directory -Path $tempPath -Force | Out-Null
     Write-Host "Created temp folder: $tempPath"
     
+    # Return the path for the upgrade service
     Write-Host $tempPath
 }
 catch {

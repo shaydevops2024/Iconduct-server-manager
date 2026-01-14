@@ -2,16 +2,8 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-} else {
-    # This script only runs on backend
-    Write-Host "Skipping UpdateDB - frontend server"
-    exit 0
-}
+# This script only runs on backend servers
+$tempPath = "D:\Temp"
 
 try {
     $updateDBPath = Join-Path $tempPath "UpdateDB"
@@ -30,8 +22,9 @@ try {
     
     # Check if UpdateDB.exe exists
     if (-not (Test-Path $updateDBExe)) {
-        Write-Error "UpdateDB.exe not found at: $updateDBExe"
-        exit 1
+        Write-Host "UpdateDB.exe not found at: $updateDBExe"
+        Write-Host "Skipping database update"
+        exit 0
     }
     
     Write-Host "Found UpdateDB.exe at: $updateDBExe"

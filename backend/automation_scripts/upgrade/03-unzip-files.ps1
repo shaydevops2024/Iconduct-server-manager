@@ -2,127 +2,91 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-} else {
-    $tempPath = "C:\inetpub\wwwroot\Temp"
-}
+# Backend only - fixed paths
+$sourcePath = "D:\IConduct-Upload"   # Where the S3 downloaded ZIP(s) are
+$tempPath   = "D:\Temp"              # Extraction root
 
 try {
-    Write-Host "Unzipping backend..."
-    
-    # Get all ZIP files in temp
-    $zipFiles = Get-ChildItem -Path $tempPath -Filter "*.zip" -File
-    
-    if ($zipFiles.Count -eq 0) {
-        Write-Host "No ZIP files found in $tempPath"
+    Write-Host "Step 1: Unzipping wrapper ZIP(s) from $sourcePath to $tempPath..."
+
+    # Get all wrapper ZIP files
+    $wrapperZips = Get-ChildItem -Path $sourcePath -Filter "*.zip" -File
+
+    if ($wrapperZips.Count -eq 0) {
+        Write-Host "No wrapper ZIP files found in $sourcePath"
         Write-Host "Done"
         exit 0
     }
-    
-    Write-Host "Found $($zipFiles.Count) ZIP file(s) in $tempPath"
-    
-    # Unzip each file to a folder named after the ZIP (without .zip extension)
-    foreach ($zipFile in $zipFiles) {
-        $folderName = [System.IO.Path]::GetFileNameWithoutExtension($zipFile.Name)
-        $extractPath = Join-Path $tempPath $folderName
-        
-        Write-Host "Unzipping: $($zipFile.Name) -> $folderName\"
-        
-        # Create folder if it doesn't exist
-        if (-not (Test-Path $extractPath)) {
-            New-Item -ItemType Directory -Path $extractPath -Force | Out-Null
-        }
-        
-        # Unzip
-        Expand-Archive -Path $zipFile.FullName -DestinationPath $extractPath -Force
-        
-        # Delete the ZIP file
-        Remove-Item -Path $zipFile.FullName -Force
-        Write-Host "Extracted and removed: $($zipFile.Name)"
+
+    Write-Host "Found $($wrapperZips.Count) wrapper ZIP file(s)."
+
+    foreach ($zip in $wrapperZips) {
+        Write-Host "Unzipping wrapper: $($zip.Name) -> $tempPath"
+        Expand-Archive -Path $zip.FullName -DestinationPath $tempPath -Force
+        Remove-Item -Path $zip.FullName -Force
+        Write-Host "Extracted and removed: $($zip.Name)"
     }
-    
-    # Handle nested ZIP files - each ZIP should create its own folder
-    Write-Host "`nChecking for nested ZIP files..."
-    
-    # Get all directories in temp (like OneDrive_1_1-11-2026)
-    $tempFolders = Get-ChildItem -Path $tempPath -Directory
-    
-    foreach ($folder in $tempFolders) {
-        Write-Host "Checking folder: $($folder.Name)"
-        
-        # Find all ZIP files in this folder
-        $nestedZips = Get-ChildItem -Path $folder.FullName -Filter "*.zip" -File
-        
-        if ($nestedZips) {
-            Write-Host "Found $($nestedZips.Count) nested ZIP files in $($folder.Name)"
-            
-            foreach ($nestedZip in $nestedZips) {
-                # Get ZIP file name without extension (this will be the folder name)
-                $serviceFolderName = [System.IO.Path]::GetFileNameWithoutExtension($nestedZip.Name)
-                
-                # Create a folder for this service in the PARENT folder
-                $serviceFolderPath = Join-Path $folder.FullName $serviceFolderName
-                
-                Write-Host "Unzipping: $($nestedZip.Name) -> $serviceFolderName\"
-                
-                # Create the service folder
-                if (-not (Test-Path $serviceFolderPath)) {
-                    New-Item -ItemType Directory -Path $serviceFolderPath -Force | Out-Null
+
+    Write-Host "`nStep 2: Processing unzipped folders inside $tempPath..."
+
+    # Get all folders created by the wrapper ZIPs
+    $unzippedFolders = Get-ChildItem -Path $tempPath -Directory
+
+    foreach ($folder in $unzippedFolders) {
+        Write-Host "Processing folder: $($folder.Name)"
+
+        # Find all ZIP files inside this folder
+        $innerZips = Get-ChildItem -Path $folder.FullName -Filter "*.zip" -File
+
+        if ($innerZips.Count -eq 0) {
+            Write-Host "No inner ZIPs found in $($folder.Name), skipping..."
+            continue
+        }
+
+        Write-Host "Found $($innerZips.Count) inner ZIP file(s) in $($folder.Name)."
+
+        foreach ($innerZip in $innerZips) {
+            $innerFolderName = [System.IO.Path]::GetFileNameWithoutExtension($innerZip.Name)
+            $destinationPath = Join-Path $tempPath $innerFolderName
+
+            Write-Host "Unzipping: $($innerZip.Name) -> $destinationPath"
+
+            # Create folder if it doesn't exist
+            if (-not (Test-Path $destinationPath)) {
+                New-Item -ItemType Directory -Path $destinationPath -Force | Out-Null
+            }
+
+            # Unzip the inner ZIP
+            Expand-Archive -Path $innerZip.FullName -DestinationPath $destinationPath -Force
+
+            # Delete the ZIP after extraction (with retry for locked files)
+            $retries = 3
+            $deleted = $false
+            for ($i = 1; $i -le $retries; $i++) {
+                try {
+                    Remove-Item -Path $innerZip.FullName -Force -ErrorAction Stop
+                    Write-Host "Extracted and removed: $($innerZip.Name)"
+                    $deleted = $true
+                    break
                 }
-                
-                # Unzip the service ZIP into its own folder
-                Expand-Archive -Path $nestedZip.FullName -DestinationPath $serviceFolderPath -Force
-                
-                # Delete the ZIP file after extraction (with retry for locked files)
-                $retries = 3
-                $deleted = $false
-                for ($i = 1; $i -le $retries; $i++) {
-                    try {
-                        Remove-Item -Path $nestedZip.FullName -Force -ErrorAction Stop
-                        Write-Host "Extracted and removed: $($nestedZip.Name)"
-                        $deleted = $true
-                        break
+                catch {
+                    if ($i -lt $retries) {
+                        Write-Host "Retry $i of $retries - ZIP file locked, waiting..."
+                        Start-Sleep -Seconds 2
                     }
-                    catch {
-                        if ($i -lt $retries) {
-                            Write-Host "Retry $i of $retries - ZIP file locked, waiting..."
-                            Start-Sleep -Seconds 2
-                        }
-                        else {
-                            Write-Host "Warning: Could not delete $($nestedZip.Name) (file locked), continuing..."
-                        }
+                    else {
+                        Write-Host "Warning: Could not delete $($innerZip.Name) (file locked), continuing..."
                     }
                 }
             }
         }
-        
-        # Now move all service folders up to temp root
-        Write-Host "`nMoving service folders to temp root..."
-        $serviceFolders = Get-ChildItem -Path $folder.FullName -Directory
-        
-        foreach ($serviceFolder in $serviceFolders) {
-            $destinationPath = Join-Path $tempPath $serviceFolder.Name
-            
-            # If destination exists, remove it first
-            if (Test-Path $destinationPath) {
-                Remove-Item -Path $destinationPath -Recurse -Force -ErrorAction SilentlyContinue
-            }
-            
-            # Move the service folder to temp root
-            Move-Item -Path $serviceFolder.FullName -Destination $destinationPath -Force
-            Write-Host "Moved: $($serviceFolder.Name) to temp root"
-        }
-        
-        # Delete the wrapper folder (like OneDrive_1_1-11-2026)
+
+        # Remove the wrapper folder after extracting all inner ZIPs
         Write-Host "Removing wrapper folder: $($folder.Name)"
         Remove-Item -Path $folder.FullName -Recurse -Force -ErrorAction SilentlyContinue
     }
-    
-    Write-Host "`nDone"
+
+    Write-Host "`nAll done! ZIPs extracted to $tempPath"
 }
 catch {
     Write-Error "Failed to unzip files: $_"

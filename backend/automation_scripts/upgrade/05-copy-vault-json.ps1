@@ -2,17 +2,9 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-    $iconductPath = "D:\IConduct"
-} else {
-    # This script only runs on backend
-    Write-Host "Skipping vault.json copy - frontend server"
-    exit 0
-}
+# This script only runs on backend servers
+$tempPath = "D:\Temp"
+$iconductPath = "D:\IConduct"
 
 try {
     $copiedCount = 0

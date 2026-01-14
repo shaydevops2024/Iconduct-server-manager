@@ -2,16 +2,9 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-    $uploadPath = "D:\IConduct-Upload"
-} else {
-    $tempPath = "C:\inetpub\wwwroot\Temp"
-    $uploadPath = "C:\inetpub\wwwroot\IConduct-Upload"
-}
+# Backend-only paths
+$tempPath = "D:\Temp"
+$uploadPath = "D:\IConduct-Upload"
 
 try {
     Write-Host "Cleaning up temporary folders..."
@@ -20,12 +13,16 @@ try {
     if (Test-Path $tempPath) {
         Remove-Item -Path $tempPath -Recurse -Force
         Write-Host "Removed temp folder: $tempPath"
+    } else {
+        Write-Host "Temp folder not found: $tempPath"
     }
     
     # Remove upload folder
     if (Test-Path $uploadPath) {
         Remove-Item -Path $uploadPath -Recurse -Force
         Write-Host "Removed upload folder: $uploadPath"
+    } else {
+        Write-Host "Upload folder not found: $uploadPath"
     }
     
     Write-Host "Cleanup completed successfully"

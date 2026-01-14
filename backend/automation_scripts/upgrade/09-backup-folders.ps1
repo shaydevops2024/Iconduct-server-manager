@@ -2,16 +2,9 @@
 
 $ErrorActionPreference = "Stop"
 
-$serverType = '{{SERVER_TYPE}}'
-
-# Set paths based on server type
-if ($serverType -eq 'backend') {
-    $tempPath = "D:\Temp"
-    $productionPath = "D:\IConduct"
-} else {
-    $tempPath = "C:\inetpub\wwwroot\Temp"
-    $productionPath = "C:\inetpub\wwwroot"
-}
+# This script only runs on backend servers
+$tempPath = "D:\Temp"
+$productionPath = "D:\IConduct"
 
 try {
     # Get current date in dd.MM.yy format

@@ -84,76 +84,72 @@ class UpgradeService {
       await this.log(`Starting upgrade for server: ${serverConfig.name} (${serverConfig.host})`);
       await this.log(`S3 Keys: ${JSON.stringify(s3Keys, null, 2)}`);
       
-      // Determine server type
-      const serverType = this.determineServerType(serverConfig);
-      console.log(`Server type detected: ${serverType}`);
+      // Backend server only
+      const serverType = 'backend';
+      console.log(`Server type forced to: ${serverType}`);
       await this.log(`Server type: ${serverType}`);
 
       // Phase 1: Download files from S3
       await this.runPhase(1, 'Download Files from S3', async () => {
-        return await this.downloadFromS3(serverConfig, s3Keys, serverType);
+        return await this.downloadFromS3(serverConfig, s3Keys);
       });
 
       // Phase 2: Create temp folder
       await this.runPhase(2, 'Create Temp Folder', async () => {
-        return await this.createTempFolder(serverConfig, serverType);
+        return await this.createTempFolder(serverConfig);
       });
 
       // Phase 3: Unzip files
       await this.runPhase(3, 'Unzip Files & Extract Nested ZIPs', async () => {
-        return await this.unzipFiles(serverConfig, serverType);
+        return await this.unzipFiles(serverConfig);
       });
 
       // Phase 3.5: Run UpdateDB (backend only)
-      if (serverType === 'backend' && s3Keys.backend) {
-        await this.runPhase(3.5, 'Run Database Update', async () => {
-          return await this.runUpdateDB(serverConfig);
-        });
-      }
+      await this.runPhase(3.5, 'Run Database Update', async () => {
+        return await this.runUpdateDB(serverConfig);
+      });
 
       // Phase 4: Smart rename
       await this.runPhase(4, 'Smart Rename Using Service Paths', async () => {
-        return await this.smartRename(serverConfig, serverType);
+        return await this.smartRename(serverConfig);
       });
 
       // Backend-specific phases
-      if (serverType === 'backend') {
-        await this.runPhase(5, 'Copy vault.json Files', async () => {
-          return await this.copyVaultFiles(serverConfig);
-        });
+      await this.runPhase(5, 'Copy vault.json Files', async () => {
+        return await this.copyVaultFiles(serverConfig);
+      });
 
-        await this.runPhase(6, 'Copy .config Files', async () => {
-          return await this.copyConfigFiles(serverConfig);
-        });
+      await this.runPhase(6, 'Copy .config Files', async () => {
+        return await this.copyConfigFiles(serverConfig);
+      });
 
-        await this.runPhase(7, 'Copy Special Folders', async () => {
-          return await this.copySpecialFolders(serverConfig);
-        });
-      }
+      await this.runPhase(7, 'Copy Special Folders', async () => {
+        return await this.copySpecialFolders(serverConfig);
+      });
 
       // Phase 8: Stop services
       await this.runPhase(8, 'Stop Services', async () => {
-        return await this.stopServices(serverConfig, serverType);
+        return await this.stopServices(serverConfig);
       });
 
       // Phase 9: Backup folders
       await this.runPhase(9, 'Backup & Move to Backup Folder', async () => {
-        return await this.backupFolders(serverConfig, serverType);
+        return await this.backupFolders(serverConfig);
       });
 
       // Phase 10: Deploy new version
       await this.runPhase(10, 'Deploy New Version', async () => {
-        return await this.deployNewVersion(serverConfig, serverType);
+        return await this.deployNewVersion(serverConfig);
       });
 
       // Phase 11: Start services
       await this.runPhase(11, 'Start Services', async () => {
-        return await this.startServices(serverConfig, serverType);
+        return await this.startServices(serverConfig);
       });
 
       // Phase 12: Cleanup temp folders
       await this.runPhase(12, 'Cleanup Temp Folders', async () => {
-        return await this.cleanupTemp(serverConfig, serverType);
+        return await this.cleanupTemp(serverConfig);
       });
 
       // Phase 13: Cleanup S3 files
@@ -293,47 +289,54 @@ class UpgradeService {
     }
   }
 
-  determineServerType(serverConfig) {
-    if (serverConfig.group && serverConfig.group.toLowerCase().includes('backend')) {
-      return 'backend';
-    }
-    return 'frontend';
-  }
-
-  async downloadFromS3(serverConfig, s3Keys, serverType) {
+  /**
+   * Backend only — no server type detection
+   */
+  async downloadFromS3(serverConfig, s3Keys) {
     const scriptTemplate = await this.loadScript('01-download-from-s3.ps1');
-    
-    let script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
-    
-    const hasBackend = s3Keys.backend ? 'true' : 'false';
-    const hasOldUI = s3Keys.oldUI ? 'true' : 'false';
-    const hasNewUI = s3Keys.newUI ? 'true' : 'false';
-    const hasApiManagement = s3Keys.apiManagement ? 'true' : 'false';
-    
+
+    const backendUrl = s3Keys.backend
+      ? await s3Service.getDownloadUrl(s3Keys.backend)
+      : '';
+
+    const oldUIUrl = s3Keys.oldUI
+      ? await s3Service.getDownloadUrl(s3Keys.oldUI)
+      : '';
+
+    const newUIUrl = s3Keys.newUI
+      ? await s3Service.getDownloadUrl(s3Keys.newUI)
+      : '';
+
+    const apiMgmtUrl = s3Keys.apiManagement
+      ? await s3Service.getDownloadUrl(s3Keys.apiManagement)
+      : '';
+
+    let script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
+
     script = script
-      .replace('{{HAS_BACKEND}}', hasBackend)
-      .replace('{{HAS_OLD_UI}}', hasOldUI)
-      .replace('{{HAS_NEW_UI}}', hasNewUI)
-      .replace('{{HAS_API_MANAGEMENT}}', hasApiManagement)
-      .replace('{{BACKEND_URL}}', s3Keys.backend || '')
-      .replace('{{OLD_UI_URL}}', s3Keys.oldUI || '')
-      .replace('{{NEW_UI_URL}}', s3Keys.newUI || '')
-      .replace('{{API_MGMT_URL}}', s3Keys.apiManagement || '');
+      .replace('{{HAS_BACKEND}}', backendUrl ? 'true' : 'false')
+      .replace('{{HAS_OLD_UI}}', oldUIUrl ? 'true' : 'false')
+      .replace('{{HAS_NEW_UI}}', newUIUrl ? 'true' : 'false')
+      .replace('{{HAS_API_MANAGEMENT}}', apiMgmtUrl ? 'true' : 'false')
+      .replace('{{BACKEND_URL}}', backendUrl)
+      .replace('{{OLD_UI_URL}}', oldUIUrl)
+      .replace('{{NEW_UI_URL}}', newUIUrl)
+      .replace('{{API_MGMT_URL}}', apiMgmtUrl);
 
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
 
-  async createTempFolder(serverConfig, serverType) {
+  async createTempFolder(serverConfig) {
     const scriptTemplate = await this.loadScript('02-create-temp-folder.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
 
-  async unzipFiles(serverConfig, serverType) {
+  async unzipFiles(serverConfig) {
     const scriptTemplate = await this.loadScript('03-unzip-files.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
@@ -344,9 +347,9 @@ class UpgradeService {
     return result.trim();
   }
 
-  async smartRename(serverConfig, serverType) {
+  async smartRename(serverConfig) {
     const scriptTemplate = await this.loadScript('04-rename-folders.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
@@ -369,26 +372,25 @@ class UpgradeService {
     return result.trim();
   }
 
-  async stopServices(serverConfig, serverType) {
+  async stopServices(serverConfig) {
     const scriptTemplate = await this.loadScript('08-stop-services.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
 
-  async backupFolders(serverConfig, serverType) {
+  async backupFolders(serverConfig) {
     const scriptTemplate = await this.loadScript('09-backup-folders.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
 
-  async deployNewVersion(serverConfig, serverType) {
+  async deployNewVersion(serverConfig) {
     const scriptTemplate = await this.loadScript('10-deploy-new-version.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     
-    // Parse deployed folders from JSON output
     const jsonMatch = result.match(/DEPLOYED_FOLDERS_JSON:\s*(\[.*?\])/s);
     if (jsonMatch) {
       try {
@@ -402,16 +404,16 @@ class UpgradeService {
     return result.trim();
   }
 
-  async startServices(serverConfig, serverType) {
+  async startServices(serverConfig) {
     const scriptTemplate = await this.loadScript('11-start-services.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
 
-  async cleanupTemp(serverConfig, serverType) {
+  async cleanupTemp(serverConfig) {
     const scriptTemplate = await this.loadScript('12-cleanup-temp.ps1');
-    const script = scriptTemplate.replace('{{SERVER_TYPE}}', serverType);
+    const script = scriptTemplate.replace('{{SERVER_TYPE}}', 'backend');
     const result = await sshService.executeScript(serverConfig, script);
     return result.trim();
   }
@@ -437,21 +439,18 @@ class UpgradeService {
     const logsDir = path.join(__dirname, '../../logs');
     
     try {
-      // Get all log files for this server
       const files = await fs.readdir(logsDir);
-      const serverLogFiles = files.filter(f => f.startsWith(`upgrade_${serverName}_`))
-                                   .sort()
-                                   .reverse(); // Most recent first
+      const serverLogFiles = files
+        .filter(f => f.startsWith(`upgrade_${serverName}_`))
+        .sort()
+        .reverse();
       
       if (serverLogFiles.length === 0) {
         return 'No logs found for this server';
       }
       
-      // Return most recent log file
       const logFilePath = path.join(logsDir, serverLogFiles[0]);
-      const logContent = await fs.readFile(logFilePath, 'utf8');
-      return logContent;
-      
+      return await fs.readFile(logFilePath, 'utf8');
     } catch (err) {
       console.error('Error reading log file:', err);
       return `Error reading log file: ${err.message}`;
@@ -464,37 +463,33 @@ class UpgradeService {
     try {
       const files = await fs.readdir(logsDir);
       const upgradeLogFiles = files.filter(f => f.startsWith('upgrade_'));
-      
       const logsList = [];
-      
+
       for (const file of upgradeLogFiles) {
         const filePath = path.join(logsDir, file);
         const stats = await fs.stat(filePath);
-        
-        // Parse filename: upgrade_SERVERNAME_2026-01-13T10-30-45-123Z.log
-        const match = file.match(/^upgrade_(.+?)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)\.log$/);
-        
+
+        const match = file.match(
+          /^upgrade_(.+?)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)\.log$/
+        );
+
         if (match) {
-          const serverName = match[1];
-          const timestampStr = match[2];
-          
-          // Convert: 2026-01-13T10-30-45-123Z → 2026-01-13T10:30:45.123Z
-          const isoTimestamp = timestampStr
-            .replace(/T(\d{2})-(\d{2})-(\d{2})-(\d+)Z/, 'T$1:$2:$3.$4Z');
-          
+          const isoTimestamp = match[2].replace(
+            /T(\d{2})-(\d{2})-(\d{2})-(\d+)Z/,
+            'T$1:$2:$3.$4Z'
+          );
+
           logsList.push({
             filename: file,
-            serverName: serverName,
+            serverName: match[1],
             timestamp: new Date(isoTimestamp),
             size: stats.size,
             createdAt: stats.birthtime
           });
         }
       }
-      
-      // Sort by timestamp descending (most recent first)
+
       logsList.sort((a, b) => b.timestamp - a.timestamp);
-      
       return logsList;
     } catch (err) {
       console.error('Error listing logs:', err);
@@ -505,32 +500,19 @@ class UpgradeService {
   async getLogContent(filename) {
     const logsDir = path.join(__dirname, '../../logs');
     const logFilePath = path.join(logsDir, filename);
-    
-    try {
-      const logContent = await fs.readFile(logFilePath, 'utf8');
-      return logContent;
-    } catch (err) {
-      console.error('Error reading log file:', err);
-      throw new Error(`Failed to read log file: ${err.message}`);
-    }
+    return await fs.readFile(logFilePath, 'utf8');
   }
 
   async deleteLog(filename) {
     const logsDir = path.join(__dirname, '../../logs');
     const logFilePath = path.join(logsDir, filename);
-    
-    // Security check - only allow deletion of upgrade log files
+
     if (!filename.startsWith('upgrade_') || !filename.endsWith('.log')) {
       throw new Error('Invalid log file name');
     }
-    
-    try {
-      await fs.unlink(logFilePath);
-      return true;
-    } catch (err) {
-      console.error('Error deleting log file:', err);
-      throw new Error(`Failed to delete log file: ${err.message}`);
-    }
+
+    await fs.unlink(logFilePath);
+    return true;
   }
 }
 
