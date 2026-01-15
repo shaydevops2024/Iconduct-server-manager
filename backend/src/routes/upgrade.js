@@ -11,7 +11,7 @@ const s3UpgradeService = require('../services/s3UpgradeService');
 const upload = multer({ storage: multer.memoryStorage() });
 
 /**
- * Get list of available servers for upgrade
+ * Get list of available servers for upgrade (BACKEND ONLY)
  */
 router.get('/servers', async (req, res) => {
   try {
@@ -26,6 +26,36 @@ router.get('/servers', async (req, res) => {
     });
   } catch (error) {
     console.error('Error fetching servers:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get list of frontend servers (for Old UI upgrade) - NEW ROUTE
+ */
+router.get('/frontend-servers', async (req, res) => {
+  try {
+    const servers = sshService.getAllServers();
+    
+    // Get frontend servers from the first backend server's frontendServers array
+    const backendWithFE = servers.find(server => server.frontendServers && server.frontendServers.length > 0);
+    
+    if (!backendWithFE) {
+      return res.json({
+        success: true,
+        servers: []
+      });
+    }
+
+    res.json({
+      success: true,
+      servers: backendWithFE.frontendServers || []
+    });
+  } catch (error) {
+    console.error('Error fetching frontend servers:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -93,7 +123,7 @@ router.post('/delete-upload', async (req, res) => {
 });
 
 /**
- * Execute upgrade
+ * Execute backend upgrade (UNCHANGED - ORIGINAL)
  */
 router.post('/execute', async (req, res) => {
   try {
@@ -138,6 +168,60 @@ router.post('/execute', async (req, res) => {
     res.status(500).json({
       success: false,
       error: error.message || 'Upgrade failed',
+      phases: error.phases || []
+    });
+  }
+});
+
+/**
+ * Execute Old UI upgrade (runs on all FE servers) - NEW ROUTE
+ */
+router.post('/execute-old-ui', async (req, res) => {
+  try {
+    const { s3Keys } = req.body;
+
+    if (!s3Keys || typeof s3Keys !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or invalid s3Keys'
+      });
+    }
+
+    if (!s3Keys.oldUI) {
+      return res.status(400).json({
+        success: false,
+        error: 'Old UI S3 key is required'
+      });
+    }
+
+    // Get frontend servers from config
+    const allServers = sshService.getAllServers();
+    const backendWithFE = allServers.find(server => server.frontendServers && server.frontendServers.length > 0);
+    
+    if (!backendWithFE || !backendWithFE.frontendServers || backendWithFE.frontendServers.length === 0) {
+      return res.status(404).json({
+        success: false,
+        error: 'No frontend servers configured'
+      });
+    }
+
+    const frontendServers = backendWithFE.frontendServers;
+
+    console.log(`Starting Old UI upgrade for ${frontendServers.length} frontend server(s)`);
+
+    // Execute Old UI upgrade
+    const result = await upgradeService.executeOldUIUpgrade(frontendServers, s3Keys);
+
+    res.json({
+      success: true,
+      result: result
+    });
+
+  } catch (error) {
+    console.error('Old UI upgrade execution error:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message || 'Old UI upgrade failed',
       phases: error.phases || []
     });
   }

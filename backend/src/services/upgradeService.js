@@ -16,7 +16,7 @@ class UpgradeService {
     this.activeUpgrades = new Map();
   }
 
-  async initializeLogging(serverName) {
+  async initializeLogging(serverName, upgradeType = 'backend') {
     this.serverName = serverName;
     const logsDir = path.join(__dirname, '../../logs');
     
@@ -29,10 +29,10 @@ class UpgradeService {
     
     // Create log file with timestamp
     const timestamp = new Date().toISOString().replace(/[:.]/g, '-');
-    this.logFilePath = path.join(logsDir, `upgrade_${serverName}_${timestamp}.log`);
+    this.logFilePath = path.join(logsDir, `upgrade_${upgradeType}_${serverName}_${timestamp}.log`);
     
     await this.log(`=================================================`);
-    await this.log(`UPGRADE LOG - ${serverName}`);
+    await this.log(`${upgradeType.toUpperCase()} UPGRADE LOG - ${serverName}`);
     await this.log(`Started: ${new Date().toISOString()}`);
     await this.log(`=================================================\n`);
   }
@@ -65,12 +65,16 @@ class UpgradeService {
     this.activeUpgrades.delete(serverName);
   }
 
+  // ==========================================
+  // BACKEND UPGRADE (UNCHANGED - ORIGINAL)
+  // ==========================================
+
   async executeUpgrade(serverConfig, s3Keys) {
     this.phases = [];
     const startTime = Date.now();
     
-    // Initialize logging
-    await this.initializeLogging(serverConfig.name);
+    // Initialize logging with 'backend' type
+    await this.initializeLogging(serverConfig.name, 'backend');
 
     // Initialize upgrade status
     this.setUpgradeStatus(serverConfig.name, {
@@ -213,6 +217,137 @@ class UpgradeService {
     }
   }
 
+  // ==========================================
+  // OLD UI UPGRADE (NEW - ADDED)
+  // ==========================================
+
+  async executeOldUIUpgrade(serverConfigs, s3Keys) {
+    this.phases = [];
+    const startTime = Date.now();
+    
+    // Use combined server names for logging
+    const serverName = serverConfigs.map(s => s.name).join('_');
+    
+    // Initialize logging with 'oldUI' type
+    await this.initializeLogging(serverName, 'oldUI');
+
+    // Initialize upgrade status
+    this.setUpgradeStatus(serverName, {
+      status: 'running',
+      phases: [],
+      startTime: new Date().toISOString(),
+      currentPhase: null
+    });
+
+    try {
+      await this.log(`Starting Old UI upgrade for servers: ${serverConfigs.map(s => s.name).join(', ')}`);
+      await this.log(`S3 Keys: ${JSON.stringify(s3Keys, null, 2)}`);
+
+      // Phase 1: Download from S3 (run on all FE servers in parallel)
+      await this.runPhase(1, 'Download Old UI from S3', async () => {
+        return await this.oldUIDownloadFromS3(serverConfigs, s3Keys);
+      });
+
+      // Phase 2: Unzip files (run on all FE servers in parallel)
+      await this.runPhase(2, 'Unzip Old UI Files', async () => {
+        return await this.oldUIUnzipFiles(serverConfigs);
+      });
+
+      // Phase 3: Copy config files (run on all FE servers in parallel)
+      await this.runPhase(3, 'Copy Config Files', async () => {
+        return await this.oldUICopyConfigFiles(serverConfigs);
+      });
+
+      // Phase 4: Stop IIS (run on all FE servers in parallel)
+      await this.runPhase(4, 'Stop IIS', async () => {
+        return await this.oldUIStopIIS(serverConfigs);
+      });
+
+      // Phase 5: Backup old version (run on all FE servers in parallel)
+      await this.runPhase(5, 'Backup Old Version', async () => {
+        return await this.oldUIBackupOldVersion(serverConfigs);
+      });
+
+      // Phase 6: Deploy new version (run on all FE servers in parallel)
+      await this.runPhase(6, 'Deploy New Version', async () => {
+        return await this.oldUIDeployNewVersion(serverConfigs);
+      });
+
+      // Phase 7: Start IIS (run on all FE servers in parallel)
+      await this.runPhase(7, 'Start IIS', async () => {
+        return await this.oldUIStartIIS(serverConfigs);
+      });
+
+      // Phase 8: Cleanup temp (run on all FE servers in parallel)
+      await this.runPhase(8, 'Cleanup Temp Folder', async () => {
+        return await this.oldUICleanupTemp(serverConfigs);
+      });
+
+      // Phase 9: Cleanup S3 files
+      await this.runPhase(9, 'Cleanup S3 Files', async () => {
+        return await this.cleanupS3Files(s3Keys);
+      });
+
+      const totalDuration = ((Date.now() - startTime) / 1000).toFixed(1);
+
+      await this.log(`\n=================================================`);
+      await this.log(`OLD UI UPGRADE COMPLETED SUCCESSFULLY`);
+      await this.log(`Total duration: ${totalDuration}s`);
+      await this.log(`Completed: ${new Date().toISOString()}`);
+      await this.log(`=================================================\n`);
+
+      // Clear upgrade status on success
+      this.clearUpgradeStatus(serverName);
+
+      return {
+        success: true,
+        message: 'Old UI upgrade completed successfully',
+        phases: this.phases,
+        duration: `${totalDuration}s`,
+        logFile: this.logFilePath
+      };
+    } catch (error) {
+      console.error('Old UI upgrade failed:', error);
+      
+      await this.log(`\n=================================================`);
+      await this.log(`OLD UI UPGRADE FAILED`);
+      await this.log(`Error: ${error.message}`);
+      await this.log(`Completed: ${new Date().toISOString()}`);
+      await this.log(`=================================================\n`);
+      
+      // Mark current phase as error
+      if (this.phases.length > 0) {
+        const lastPhase = this.phases[this.phases.length - 1];
+        if (lastPhase.status === 'running') {
+          lastPhase.status = 'error';
+          lastPhase.error = error.message;
+        }
+      }
+
+      // Update status with error
+      this.setUpgradeStatus(serverName, {
+        status: 'error',
+        phases: this.phases,
+        error: error.message
+      });
+
+      // Clear after a delay to allow final status check
+      setTimeout(() => {
+        this.clearUpgradeStatus(serverName);
+      }, 30000);
+
+      throw {
+        message: error.message,
+        phases: this.phases,
+        logFile: this.logFilePath
+      };
+    }
+  }
+
+  // ==========================================
+  // SHARED UTILITY METHODS
+  // ==========================================
+
   async runPhase(phaseNumber, phaseName, phaseFunction) {
     const phaseStart = Date.now();
     
@@ -289,9 +424,10 @@ class UpgradeService {
     }
   }
 
-  /**
-   * Backend only — no server type detection
-   */
+  // ==========================================
+  // BACKEND UPGRADE PHASE METHODS (UNCHANGED)
+  // ==========================================
+
   async downloadFromS3(serverConfig, s3Keys) {
     const scriptTemplate = await this.loadScript('01-download-from-s3.ps1');
 
@@ -429,6 +565,136 @@ class UpgradeService {
     return `Cleaned up ${filesToDelete.length} file(s) from S3 bucket`;
   }
 
+  // ==========================================
+  // OLD UI UPGRADE PHASE METHODS (NEW - ADDED)
+  // ==========================================
+
+  async oldUIDownloadFromS3(serverConfigs, s3Keys) {
+    const scriptTemplate = await this.loadScript('oldUI_01-download-from-s3.ps1');
+
+    const oldUIUrl = s3Keys.oldUI
+      ? await s3Service.getDownloadUrl(s3Keys.oldUI)
+      : '';
+
+    if (!oldUIUrl) {
+      throw new Error('Old UI S3 key not provided');
+    }
+
+    const script = scriptTemplate.replace('{{OLD_UI_URL}}', oldUIUrl);
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, script);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUIUnzipFiles(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_02-unzip-files.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUICopyConfigFiles(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_03-copy-config-files.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUIStopIIS(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_04-stop-iis.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUIBackupOldVersion(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_05-backup-old-version.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUIDeployNewVersion(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_06-deploy-new-version.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUIStartIIS(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_07-start-iis.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  async oldUICleanupTemp(serverConfigs) {
+    const scriptTemplate = await this.loadScript('oldUI_08-cleanup-temp.ps1');
+
+    // Run on all FE servers in parallel
+    const results = await Promise.all(
+      serverConfigs.map(async (config) => {
+        const result = await sshService.executeScript(config, scriptTemplate);
+        return `${config.name}: ${result.trim()}`;
+      })
+    );
+
+    return results.join('\n');
+  }
+
+  // ==========================================
+  // COMMON UTILITY METHODS
+  // ==========================================
+
   async loadScript(scriptName) {
     const scriptPath = path.join(this.scriptsPath, scriptName);
     const content = await fs.readFile(scriptPath, 'utf8');
@@ -440,8 +706,20 @@ class UpgradeService {
     
     try {
       const files = await fs.readdir(logsDir);
+      
+      // Support both old format (upgrade_ServerName_timestamp.log) and new format (upgrade_type_ServerName_timestamp.log)
       const serverLogFiles = files
-        .filter(f => f.startsWith(`upgrade_${serverName}_`))
+        .filter(f => {
+          // Match old format: upgrade_ServerName_timestamp.log
+          const oldFormat = f.match(/^upgrade_(.+?)_(\d{4}-\d{2}-\d{2}T.+)\.log$/);
+          if (oldFormat && oldFormat[1] === serverName) return true;
+          
+          // Match new format: upgrade_type_ServerName_timestamp.log
+          const newFormat = f.match(/^upgrade_(.+?)_(.+?)_(\d{4}-\d{2}-\d{2}T.+)\.log$/);
+          if (newFormat && newFormat[2] === serverName) return true;
+          
+          return false;
+        })
         .sort()
         .reverse();
       
@@ -469,23 +747,46 @@ class UpgradeService {
         const filePath = path.join(logsDir, file);
         const stats = await fs.stat(filePath);
 
-        const match = file.match(
-          /^upgrade_(.+?)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)\.log$/
+        // Try new format first: upgrade_type_ServerName_timestamp.log
+        let match = file.match(
+          /^upgrade_(.+?)_(.+?)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)\.log$/
         );
 
         if (match) {
-          const isoTimestamp = match[2].replace(
+          const isoTimestamp = match[3].replace(
             /T(\d{2})-(\d{2})-(\d{2})-(\d+)Z/,
             'T$1:$2:$3.$4Z'
           );
 
           logsList.push({
             filename: file,
-            serverName: match[1],
+            upgradeType: match[1],
+            serverName: match[2],
             timestamp: new Date(isoTimestamp),
             size: stats.size,
             createdAt: stats.birthtime
           });
+        } else {
+          // Try old format: upgrade_ServerName_timestamp.log
+          match = file.match(
+            /^upgrade_(.+?)_(\d{4}-\d{2}-\d{2}T\d{2}-\d{2}-\d{2}-\d+Z)\.log$/
+          );
+
+          if (match) {
+            const isoTimestamp = match[2].replace(
+              /T(\d{2})-(\d{2})-(\d{2})-(\d+)Z/,
+              'T$1:$2:$3.$4Z'
+            );
+
+            logsList.push({
+              filename: file,
+              upgradeType: 'backend', // Default to backend for old logs
+              serverName: match[1],
+              timestamp: new Date(isoTimestamp),
+              size: stats.size,
+              createdAt: stats.birthtime
+            });
+          }
         }
       }
 
