@@ -91,7 +91,7 @@ try {
 
     if ($natsService) {
         # Start single combined service
-        if (Start-ServiceSafe -serviceName $natsService -sleepSeconds 10) {
+        if (Start-ServiceSafe -serviceName $natsService -sleepSeconds 5) {
             $startedCount++
         }
     } else {
@@ -100,13 +100,13 @@ try {
         $natsStreamer = Find-ServiceByPattern @("nats", "streamer")
 
         if ($natsServer) {
-            if (Start-ServiceSafe -serviceName $natsServer -sleepSeconds 5) {
+            if (Start-ServiceSafe -serviceName $natsServer -sleepSeconds 2) {
                 $startedCount++
             }
         }
 
         if ($natsStreamer) {
-            if (Start-ServiceSafe -serviceName $natsStreamer -sleepSeconds 5) {
+            if (Start-ServiceSafe -serviceName $natsStreamer -sleepSeconds 2) {
                 $startedCount++
             }
         }
@@ -118,7 +118,7 @@ try {
     Write-Host "`n=== Starting Notification ==="
     $notificationService = Find-ServiceByPattern @("noti")
     if ($notificationService) {
-        if (Start-ServiceSafe -serviceName $notificationService -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $notificationService -sleepSeconds 2) {
             $startedCount++
         }
     }
@@ -129,7 +129,7 @@ try {
     Write-Host "`n=== Starting Repository ==="
     $repoService = Find-ServiceByPattern @("repository")
     if ($repoService) {
-        if (Start-ServiceSafe -serviceName $repoService -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $repoService -sleepSeconds 2) {
             $startedCount++
         }
     }
@@ -140,7 +140,7 @@ try {
     Write-Host "`n=== Starting Scheduler Storage ==="
     $schedulerStorageService = Find-ServiceByPattern @("scheduler", "storage")
     if ($schedulerStorageService) {
-        if (Start-ServiceSafe -serviceName $schedulerStorageService -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $schedulerStorageService -sleepSeconds 2) {
             $startedCount++
         }
     }
@@ -170,7 +170,7 @@ try {
     Write-Host "`n=== Starting DataBus ==="
     $databusService = Find-ServiceByPattern @("databus")
     if ($databusService) {
-        if (Start-ServiceSafe -serviceName $databusService -sleepSeconds 3) {
+        if (Start-ServiceSafe -serviceName $databusService -sleepSeconds 2) {
             $startedCount++
         }
     }
@@ -181,13 +181,13 @@ try {
     Write-Host "`n=== Starting License Service ==="
     $licenseService = Find-ServiceByPattern @("license")
     if ($licenseService) {
-        if (Start-ServiceSafe -serviceName $licenseService -sleepSeconds 3) {
+        if (Start-ServiceSafe -serviceName $licenseService -sleepSeconds 2) {
             $startedCount++
         }
     }
 
     # Critical wait before agents
-    Write-Host "`n⏳ WAITING 30 SECONDS BEFORE STARTING AGENTS..."
+    Write-Host "WAITING 30 SECONDS BEFORE STARTING AGENTS..."
     Start-Sleep -Seconds 30
 
     # -----------------------------
@@ -198,13 +198,13 @@ try {
     $agent02 = $serviceNames | Where-Object { $_ -imatch "Cloud" -and $_ -imatch "Agent" -and $_ -imatch "02" } | Select-Object -First 1
 
     if ($agent01) {
-        if (Start-ServiceSafe -serviceName $agent01 -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $agent01 -sleepSeconds 2) {
             $startedCount++
         }
     }
 
     if ($agent02) {
-        if (Start-ServiceSafe -serviceName $agent02 -sleepSeconds 5) {
+        if (Start-ServiceSafe -serviceName $agent02 -sleepSeconds 2) {
             $startedCount++
         }
     }

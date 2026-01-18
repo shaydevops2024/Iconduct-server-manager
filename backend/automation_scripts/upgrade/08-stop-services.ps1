@@ -42,7 +42,7 @@ try {
                 Write-Host "Could not kill process PID $($process.Id) - $($_.Exception.Message)"
             }
         }
-        Start-Sleep -Seconds 3
+        Start-Sleep -Seconds 2
     }
     else {
         Write-Host "No ServIT.IConduct.WinService processes found"
@@ -106,7 +106,7 @@ try {
                             $stoppedCount++
                         }
 
-                        Start-Sleep -Seconds 8
+                        Start-Sleep -Seconds 5
                     }
                     else {
                         Write-Host "Service already stopped $($serviceName)"

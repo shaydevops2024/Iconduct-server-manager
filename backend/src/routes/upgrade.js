@@ -11,21 +11,18 @@ const s3UpgradeService = require('../services/s3UpgradeService');
 const upload = multer({ storage: multer.memoryStorage() });
 
 /**
- * Get list of available servers for upgrade (BACKEND ONLY)
+ * Get list of available server groups
  */
-router.get('/servers', async (req, res) => {
+router.get('/server-groups', async (req, res) => {
   try {
-    const servers = sshService.getAllServers();
-    
-    // Filter to only backend servers (exclude frontend)
-    const backendServers = servers.filter(server => server.group !== 'frontend');
+    const groups = sshService.getServerGroups();
 
     res.json({
       success: true,
-      servers: backendServers
+      groups: groups
     });
   } catch (error) {
-    console.error('Error fetching servers:', error);
+    console.error('Error fetching server groups:', error);
     res.status(500).json({
       success: false,
       error: error.message
@@ -34,16 +31,48 @@ router.get('/servers', async (req, res) => {
 });
 
 /**
- * Get list of frontend servers (for Old UI upgrade) - NEW ROUTE
+ * Get backend server for a specific group
  */
-router.get('/frontend-servers', async (req, res) => {
+router.get('/servers/:groupName', async (req, res) => {
   try {
+    const { groupName } = req.params;
+    const servers = sshService.getServersByGroup(groupName);
+    
+    // Get the backend server (not frontend)
+    const backendServer = servers.find(s => !s.name.includes('FE'));
+
+    if (!backendServer) {
+      return res.status(404).json({
+        success: false,
+        error: `No backend server found for group: ${groupName}`
+      });
+    }
+
+    res.json({
+      success: true,
+      server: backendServer
+    });
+  } catch (error) {
+    console.error('Error fetching server:', error);
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+/**
+ * Get frontend servers for a specific group
+ */
+router.get('/frontend-servers/:groupName', async (req, res) => {
+  try {
+    const { groupName } = req.params;
     const servers = sshService.getAllServers();
     
-    // Get frontend servers from the first backend server's frontendServers array
-    const backendWithFE = servers.find(server => server.frontendServers && server.frontendServers.length > 0);
+    // Get backend server that has frontendServers
+    const backendServer = servers.find(s => s.group === groupName && s.frontendServers);
     
-    if (!backendWithFE) {
+    if (!backendServer || !backendServer.frontendServers) {
       return res.json({
         success: true,
         servers: []
@@ -52,7 +81,7 @@ router.get('/frontend-servers', async (req, res) => {
 
     res.json({
       success: true,
-      servers: backendWithFE.frontendServers || []
+      servers: backendServer.frontendServers || []
     });
   } catch (error) {
     console.error('Error fetching frontend servers:', error);
@@ -123,16 +152,23 @@ router.post('/delete-upload', async (req, res) => {
 });
 
 /**
- * Execute backend upgrade (UNCHANGED - ORIGINAL)
+ * Execute multi-server upgrade (MAIN ROUTE)
  */
-router.post('/execute', async (req, res) => {
+router.post('/execute-multi', async (req, res) => {
   try {
-    const { serverName, s3Keys } = req.body;
+    const { serverGroup, selectedServers, s3Keys } = req.body;
 
-    if (!serverName) {
+    if (!serverGroup) {
       return res.status(400).json({
         success: false,
-        error: 'Missing required field: serverName'
+        error: 'Missing required field: serverGroup'
+      });
+    }
+
+    if (!selectedServers || typeof selectedServers !== 'object') {
+      return res.status(400).json({
+        success: false,
+        error: 'Missing or invalid selectedServers'
       });
     }
 
@@ -143,74 +179,73 @@ router.post('/execute', async (req, res) => {
       });
     }
 
-    // Get server config from sshService
+    // Get all servers for this group
     const allServers = sshService.getAllServers();
-    const serverConfig = allServers.find(s => s.name === serverName);
-    if (!serverConfig) {
-      return res.status(404).json({
-        success: false,
-        error: `Server not found: ${serverName}`
-      });
-    }
-
-    console.log(`Starting upgrade for ${serverName}`);
-
-    // Execute upgrade
-    const result = await upgradeService.executeUpgrade(serverConfig, s3Keys);
-
-    res.json({
-      success: true,
-      result: result
-    });
-
-  } catch (error) {
-    console.error('Upgrade execution error:', error);
-    res.status(500).json({
-      success: false,
-      error: error.message || 'Upgrade failed',
-      phases: error.phases || []
-    });
-  }
-});
-
-/**
- * Execute Old UI upgrade (runs on all FE servers) - NEW ROUTE
- */
-router.post('/execute-old-ui', async (req, res) => {
-  try {
-    const { s3Keys } = req.body;
-
-    if (!s3Keys || typeof s3Keys !== 'object') {
-      return res.status(400).json({
-        success: false,
-        error: 'Missing or invalid s3Keys'
-      });
-    }
-
-    if (!s3Keys.oldUI) {
-      return res.status(400).json({
-        success: false,
-        error: 'Old UI S3 key is required'
-      });
-    }
-
-    // Get frontend servers from config
-    const allServers = sshService.getAllServers();
-    const backendWithFE = allServers.find(server => server.frontendServers && server.frontendServers.length > 0);
+    const groupServers = allServers.filter(s => s.group === serverGroup);
     
-    if (!backendWithFE || !backendWithFE.frontendServers || backendWithFE.frontendServers.length === 0) {
+    if (groupServers.length === 0) {
       return res.status(404).json({
         success: false,
-        error: 'No frontend servers configured'
+        error: `No servers found for group: ${serverGroup}`
       });
     }
 
-    const frontendServers = backendWithFE.frontendServers;
+    // Get backend server
+    const backendServer = groupServers.find(s => !s.name.includes('FE'));
+    
+    // Get frontend servers from backend server's frontendServers array
+    let frontendServers = [];
+    if (backendServer && backendServer.frontendServers) {
+      frontendServers = backendServer.frontendServers;
+    }
 
-    console.log(`Starting Old UI upgrade for ${frontendServers.length} frontend server(s)`);
+    const serverConfigs = {
+      backend: selectedServers.backend && backendServer ? backendServer : null,
+      fe1: selectedServers.fe1 && frontendServers[0] ? frontendServers[0] : null,
+      fe2: selectedServers.fe2 && frontendServers[1] ? frontendServers[1] : null,
+    };
 
-    // Execute Old UI upgrade
-    const result = await upgradeService.executeOldUIUpgrade(frontendServers, s3Keys);
+    // Validate that selected servers exist
+    if (selectedServers.backend && !serverConfigs.backend) {
+      return res.status(404).json({
+        success: false,
+        error: `Backend server not found in group: ${serverGroup}`
+      });
+    }
+    if (selectedServers.fe1 && !serverConfigs.fe1) {
+      return res.status(404).json({
+        success: false,
+        error: `Frontend server 1 not found in group: ${serverGroup}`
+      });
+    }
+    if (selectedServers.fe2 && !serverConfigs.fe2) {
+      return res.status(404).json({
+        success: false,
+        error: `Frontend server 2 not found in group: ${serverGroup}`
+      });
+    }
+
+    // Validate required files are uploaded
+    if (selectedServers.backend && !s3Keys.backend) {
+      return res.status(400).json({
+        success: false,
+        error: 'Backend S3 key is required for backend upgrade'
+      });
+    }
+
+    if ((selectedServers.fe1 || selectedServers.fe2) && !s3Keys.oldUI) {
+      return res.status(400).json({
+        success: false,
+        error: 'Old UI S3 key is required for frontend upgrade'
+      });
+    }
+
+    console.log(`Starting multi-server upgrade for group: ${serverGroup}`);
+    console.log('Selected servers:', selectedServers);
+    console.log('S3 keys:', s3Keys);
+
+    // Execute multi-server upgrade
+    const result = await upgradeService.executeMultiServerUpgrade(serverGroup, selectedServers, serverConfigs, s3Keys);
 
     res.json({
       success: true,
@@ -218,10 +253,10 @@ router.post('/execute-old-ui', async (req, res) => {
     });
 
   } catch (error) {
-    console.error('Old UI upgrade execution error:', error);
+    console.error('Multi-server upgrade execution error:', error);
     res.status(500).json({
       success: false,
-      error: error.message || 'Old UI upgrade failed',
+      error: error.message || 'Multi-server upgrade failed',
       phases: error.phases || []
     });
   }
@@ -230,11 +265,11 @@ router.post('/execute-old-ui', async (req, res) => {
 /**
  * Get upgrade status (for live polling)
  */
-router.get('/status/:serverName', async (req, res) => {
+router.get('/status/:upgradeKey', async (req, res) => {
   try {
-    const { serverName } = req.params;
+    const { upgradeKey } = req.params;
     
-    const status = upgradeService.getUpgradeStatus(serverName);
+    const status = upgradeService.getUpgradeStatus(upgradeKey);
     
     if (!status) {
       return res.json({
@@ -258,13 +293,13 @@ router.get('/status/:serverName', async (req, res) => {
 });
 
 /**
- * Get upgrade logs for a server (most recent)
+ * Get upgrade logs for a server or upgrade key (most recent)
  */
-router.get('/logs/:serverName', async (req, res) => {
+router.get('/logs/:serverNameOrKey', async (req, res) => {
   try {
-    const { serverName } = req.params;
+    const { serverNameOrKey } = req.params;
     
-    const logs = await upgradeService.getUpgradeLogs(serverName);
+    const logs = await upgradeService.getUpgradeLogs(serverNameOrKey);
     
     res.json({
       success: true,
