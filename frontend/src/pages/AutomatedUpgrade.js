@@ -1,87 +1,30 @@
 // Full path: frontend/src/pages/AutomatedUpgrade.js
 
 import React, { useState, useEffect, useRef } from 'react';
-import { FaUpload, FaRocket, FaServer, FaCheckCircle, FaExclamationTriangle, FaSpinner, FaTimesCircle, FaFileArchive, FaClock, FaCloudUploadAlt, FaFileAlt, FaHistory, FaTrash } from 'react-icons/fa';
+import { FaUpload, FaRocket, FaServer, FaCheckCircle, FaExclamationTriangle, FaSpinner, FaTimesCircle, FaFileArchive, FaClock, FaCloudUploadAlt, FaFileAlt, FaHistory, FaTrash, FaCircle } from 'react-icons/fa';
 import axios from 'axios';
 
 const API_URL = process.env.REACT_APP_API_URL !== undefined
   ? (process.env.REACT_APP_API_URL || '')
   : '';
 
-// Backend phases (13 phases)
-const BACKEND_PHASES = [
-  { phase: 1, name: 'Download Files from S3' },
-  { phase: 2, name: 'Create Temp Folder' },
-  { phase: 3, name: 'Unzip Files & Extract Nested ZIPs' },
-  { phase: 3.5, name: 'Run Database Update' },
-  { phase: 4, name: 'Smart Rename Using Service Paths' },
-  { phase: 5, name: 'Copy vault.json Files' },
-  { phase: 6, name: 'Copy .config Files' },
-  { phase: 7, name: 'Copy Special Folders' },
-  { phase: 8, name: 'Stop Services' },
-  { phase: 9, name: 'Backup & Move to Backup Folder' },
-  { phase: 10, name: 'Deploy New Version' },
-  { phase: 11, name: 'Start Services' },
-  { phase: 12, name: 'Cleanup Temp Folders' },
-  { phase: 13, name: 'Cleanup S3 Files' },
-];
-
-// Old UI phases (8 phases)
-const OLDUI_PHASES = [
-  { phase: 1, name: 'Download Old UI from S3' },
-  { phase: 2, name: 'Unzip Files' },
-  { phase: 3, name: 'Copy Config Files' },
-  { phase: 4, name: 'Stop IIS' },
-  { phase: 5, name: 'Backup Old Version' },
-  { phase: 6, name: 'Deploy New Version' },
-  { phase: 7, name: 'Start IIS' },
-  { phase: 8, name: 'Cleanup Temp Folders' },
-];
-
 const AutomatedUpgrade = () => {
-  // Adaptive grid helper functions
-  const getAdaptiveGridClass = (itemCount) => {
-    if (itemCount === 1) {
-      return 'flex justify-center';
-    } else if (itemCount === 2) {
-      return 'grid grid-cols-1 md:grid-cols-2 gap-4';
-    } else {
-      return 'grid grid-cols-1 md:grid-cols-3 gap-4';
-    }
-  };
-
-  const getItemWrapperClass = (index, totalItems) => {
-    // 1 item: centered with max width
-    if (totalItems === 1) return 'max-w-md';
-    
-    // 4 items: 4th item spans all 3 columns and centers content
-    if (totalItems === 4 && index === 3) return 'md:col-span-3 flex justify-center';
-    
-    // 5 items: items 3-4 wrapped together in a 2-column grid spanning all 3 columns
-    if (totalItems === 5 && index === 3) return 'md:col-span-3 grid grid-cols-1 md:grid-cols-2 gap-4';
-    if (totalItems === 5 && index === 4) return 'hidden'; // Rendered within index 3
-    
-    return '';
-  };
-
-  const shouldRenderItem = (index, totalItems) => {
-    // Skip rendering item 5 separately (it's rendered with item 4)
-    return !(totalItems === 5 && index === 4);
-  };
-
   const [files, setFiles] = useState({
     backend: null,
     oldUI: null,
+    newUI: null,
   });
   
   const [s3Keys, setS3Keys] = useState({
     backend: null,
     oldUI: null,
+    newUI: null,
   });
   
   const [uploadProgress, setUploadProgress] = useState({
     backend: 0,
     oldUI: 0,
+    newUI: 0,
   });
   
   const [uploading, setUploading] = useState(false);
@@ -92,11 +35,17 @@ const AutomatedUpgrade = () => {
   const [selectedGroup, setSelectedGroup] = useState('');
   const [loadingGroups, setLoadingGroups] = useState(true);
   
-  // Multi-select server selection for the chosen group
+  // Server selection (which servers are selected)
   const [selectedServers, setSelectedServers] = useState({
     backend: false,
     fe1: false,
     fe2: false,
+  });
+
+  // FE1 UI type selection (only relevant if fe1 is selected)
+  const [fe1UITypes, setFe1UITypes] = useState({
+    oldUI: false,
+    newUI: false,
   });
   
   const [servers, setServers] = useState({
@@ -150,68 +99,21 @@ const AutomatedUpgrade = () => {
     }
   }, [upgrading]);
 
-  // Determine which phases to show based on selected servers
-  const getPhaseTemplate = () => {
-    const hasBackend = selectedServers.backend;
-    const hasFrontend = selectedServers.fe1 || selectedServers.fe2;
-    
-    if (hasBackend && !hasFrontend) {
-      return BACKEND_PHASES;
-    } else if (!hasBackend && hasFrontend) {
-      return OLDUI_PHASES;
-    } else if (hasBackend && hasFrontend) {
-      // Combined: backend phases + old UI phases (without S3 cleanup duplicate)
-      return [...BACKEND_PHASES];
-    }
-    return [];
-  };
-
-  // Initialize all phases when upgrade starts
-  useEffect(() => {
-    if (upgrading && allPhases.length === 0) {
-      const phaseTemplate = getPhaseTemplate();
-      const initialPhases = phaseTemplate.map(p => ({
-        ...p,
-        status: 'pending',
-        duration: null,
-        details: null,
-        error: null
-      }));
-      setAllPhases(initialPhases);
-    }
-  }, [upgrading, allPhases.length, selectedServers]);
-
   // Update phase statuses as backend reports progress
   useEffect(() => {
     if (phaseProgress.length > 0) {
-      const phaseTemplate = getPhaseTemplate();
-      const updatedPhases = phaseTemplate.map(templatePhase => {
-        const progressPhase = phaseProgress.find(p => p.phase === templatePhase.phase);
-        if (progressPhase) {
-          return progressPhase;
-        }
-        return {
-          ...templatePhase,
-          status: 'pending',
-          duration: null,
-          details: null,
-          error: null
-        };
-      });
-      setAllPhases(updatedPhases);
+      setAllPhases(phaseProgress);
     }
-  }, [phaseProgress, selectedServers]);
+  }, [phaseProgress]);
 
   // Start/stop polling for live updates
   useEffect(() => {
     if (upgrading) {
-      // Get upgrade key for status polling
       const upgradeKey = getUpgradeKey();
       
-      // Start polling
       pollingIntervalRef.current = setInterval(() => {
         pollUpgradeStatus(upgradeKey);
-      }, 3000); // Poll every 3 seconds
+      }, 3000);
       
       return () => {
         if (pollingIntervalRef.current) {
@@ -219,13 +121,14 @@ const AutomatedUpgrade = () => {
         }
       };
     }
-  }, [upgrading, selectedGroup, selectedServers]);
+  }, [upgrading, selectedGroup, selectedServers, fe1UITypes]);
 
   const getUpgradeKey = () => {
     const parts = [selectedGroup];
     if (selectedServers.backend) parts.push('backend');
-    if (selectedServers.fe1) parts.push('fe1');
+    if (selectedServers.fe1 && fe1UITypes.oldUI) parts.push('fe1');
     if (selectedServers.fe2) parts.push('fe2');
+    if (selectedServers.fe1 && fe1UITypes.newUI) parts.push('newUI');
     return parts.join('_');
   };
 
@@ -234,12 +137,10 @@ const AutomatedUpgrade = () => {
       const response = await axios.get(`${API_URL}/api/upgrade/status/${upgradeKey}`);
       
       if (response.data.success && response.data.status === 'running') {
-        // Update phases
         if (response.data.phases && response.data.phases.length > 0) {
           setPhaseProgress(response.data.phases);
         }
         
-        // Update current phase
         if (response.data.currentPhase) {
           setCurrentPhase(response.data.currentPhase);
         }
@@ -270,18 +171,17 @@ const AutomatedUpgrade = () => {
   const handleGroupSelect = async (groupName) => {
     setSelectedGroup(groupName);
     setSelectedServers({ backend: false, fe1: false, fe2: false });
+    setFe1UITypes({ oldUI: false, newUI: false });
     setServers({ backend: null, fe1: null, fe2: null });
     
     if (!groupName) return;
 
     try {
-      // Load backend server for this group
       const backendResponse = await axios.get(`${API_URL}/api/upgrade/servers/${groupName}`);
       if (backendResponse.data && backendResponse.data.success) {
         setServers(prev => ({ ...prev, backend: backendResponse.data.server }));
       }
       
-      // Load frontend servers for this group
       const frontendResponse = await axios.get(`${API_URL}/api/upgrade/frontend-servers/${groupName}`);
       if (frontendResponse.data && frontendResponse.data.success && Array.isArray(frontendResponse.data.servers)) {
         const feServers = frontendResponse.data.servers;
@@ -302,6 +202,17 @@ const AutomatedUpgrade = () => {
     setSelectedServers(prev => ({
       ...prev,
       [serverType]: !prev[serverType]
+    }));
+
+    if (serverType === 'fe1' && selectedServers.fe1) {
+      setFe1UITypes({ oldUI: false, newUI: false });
+    }
+  };
+
+  const handleFE1UITypeToggle = (uiType) => {
+    setFe1UITypes(prev => ({
+      ...prev,
+      [uiType]: !prev[uiType]
     }));
   };
 
@@ -376,30 +287,33 @@ const AutomatedUpgrade = () => {
   };
 
   const handleStartUpgrade = () => {
-    // Validate server group is selected
     if (!selectedGroup) {
       setError('Please select a server group first');
       return;
     }
 
-    // Validate at least one server is selected
-    const hasSelection = selectedServers.backend || selectedServers.fe1 || selectedServers.fe2;
-    if (!hasSelection) {
-      setError('Please select at least one server to upgrade');
+    const hasBackend = selectedServers.backend;
+    const hasFE1OldUI = selectedServers.fe1 && fe1UITypes.oldUI;
+    const hasFE1NewUI = selectedServers.fe1 && fe1UITypes.newUI;
+    const hasFE2 = selectedServers.fe2;
+
+    if (!hasBackend && !hasFE1OldUI && !hasFE1NewUI && !hasFE2) {
+      setError('Please select at least one server and UI type to upgrade');
       return;
     }
 
-    // Validate required files are uploaded
-    const needsBackend = selectedServers.backend;
-    const needsFrontend = selectedServers.fe1 || selectedServers.fe2;
-
-    if (needsBackend && !s3Keys.backend) {
+    if (hasBackend && !s3Keys.backend) {
       setError('Please upload Backend ZIP file');
       return;
     }
 
-    if (needsFrontend && !s3Keys.oldUI) {
+    if ((hasFE1OldUI || hasFE2) && !s3Keys.oldUI) {
       setError('Please upload Old UI ZIP file');
+      return;
+    }
+
+    if (hasFE1NewUI && !s3Keys.newUI) {
+      setError('Please upload New UI ZIP file');
       return;
     }
 
@@ -415,12 +329,19 @@ const AutomatedUpgrade = () => {
     setAllPhases([]);
 
     try {
+      const backendSelectedServers = {
+        backend: selectedServers.backend,
+        fe1: selectedServers.fe1 && fe1UITypes.oldUI,
+        fe2: selectedServers.fe2,
+        newUI: selectedServers.fe1 && fe1UITypes.newUI,
+      };
+
       const response = await axios.post(`${API_URL}/api/upgrade/execute-multi`, {
         serverGroup: selectedGroup,
-        selectedServers: selectedServers,
+        selectedServers: backendSelectedServers,
         s3Keys: s3Keys
       }, {
-        timeout: 1200000 // 20 minutes (increased for IIS retry logic)
+        timeout: 1200000
       });
 
       if (response.data.success) {
@@ -504,7 +425,6 @@ const AutomatedUpgrade = () => {
     try {
       await axios.delete(`${API_URL}/api/upgrade/logs/${logToDelete}`);
       
-      // Refresh logs history
       const response = await axios.get(`${API_URL}/api/upgrade/logs`);
       setLogsHistory(response.data.logs || []);
       
@@ -522,27 +442,33 @@ const AutomatedUpgrade = () => {
     else return (bytes / 1048576).toFixed(2) + ' MB';
   };
 
-  const formatDuration = (seconds) => {
-    const hrs = Math.floor(seconds / 3600);
-    const mins = Math.floor((seconds % 3600) / 60);
-    const secs = Math.floor(seconds % 60);
-    return `${hrs.toString().padStart(2, '0')}:${mins.toString().padStart(2, '0')}:${secs.toString().padStart(2, '0')}`;
-  };
-
   const getSelectedServersCount = () => {
-    return Object.values(selectedServers).filter(Boolean).length;
+    let count = 0;
+    if (selectedServers.backend) count++;
+    if (selectedServers.fe1) count++;
+    if (selectedServers.fe2) count++;
+    return count;
   };
 
   const getSelectedServersNames = () => {
     const names = [];
-    if (selectedServers.backend && servers.backend) names.push(servers.backend.name);
-    if (selectedServers.fe1 && servers.fe1) names.push(servers.fe1.name);
-    if (selectedServers.fe2 && servers.fe2) names.push(servers.fe2.name);
+    if (selectedServers.backend && servers.backend) {
+      names.push(servers.backend.name);
+    }
+    if (selectedServers.fe1 && servers.fe1) {
+      const uiTypes = [];
+      if (fe1UITypes.oldUI) uiTypes.push('Old UI');
+      if (fe1UITypes.newUI) uiTypes.push('New UI');
+      names.push(`${servers.fe1.name} (${uiTypes.join(' + ')})`);
+    }
+    if (selectedServers.fe2 && servers.fe2) {
+      names.push(`${servers.fe2.name} (Old UI)`);
+    }
     return names.join(', ');
   };
 
   // Server Card Component
-  const ServerCard = ({ server, isSelected, onToggle }) => {
+  const ServerCard = ({ server, isSelected, onToggle, showUIOptions, uiTypes, onUITypeToggle }) => {
     const colorClasses = {
       blue: { 
         border: 'border-blue-500 bg-blue-50 dark:bg-blue-900/20', 
@@ -564,21 +490,65 @@ const AutomatedUpgrade = () => {
     const colors = colorClasses[server.color];
     
     return (
-      <div
-        onClick={() => onToggle(server.type)}
-        className={`cursor-pointer border-2 rounded-xl p-4 transition-all h-full ${
-          isSelected ? colors.border : `border-gray-300 dark:border-gray-600 ${colors.hover}`
-        }`}
-      >
-        <div className="flex items-center justify-between mb-2">
-          <div className="flex items-center space-x-2">
-            <FaServer className={isSelected ? colors.icon : 'text-gray-400'} />
-            <span className="font-semibold text-gray-900 dark:text-white">{server.label}</span>
+      <div className="space-y-3">
+        <div
+          onClick={() => onToggle(server.type)}
+          className={`relative cursor-pointer rounded-xl border-2 transition-all p-4 ${
+            isSelected 
+              ? `${colors.border} shadow-lg` 
+              : 'border-gray-300 dark:border-gray-600 hover:border-gray-400 dark:hover:border-gray-500'
+          } ${colors.hover}`}
+        >
+          <div className="flex items-center justify-between">
+            <div className="flex items-center space-x-3 flex-1">
+              <FaServer className={`text-2xl ${isSelected ? colors.icon : 'text-gray-400'}`} />
+              <div className="flex-1">
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">{server.label}</h3>
+                <p className="text-sm text-gray-600 dark:text-gray-400">{server.config.name}</p>
+                <p className="text-xs text-gray-500 dark:text-gray-500">{server.config.host}</p>
+              </div>
+            </div>
+            <div className={`w-6 h-6 rounded border-2 flex items-center justify-center ${
+              isSelected 
+                ? `${colors.border} bg-white dark:bg-gray-800` 
+                : 'border-gray-300 dark:border-gray-600'
+            }`}>
+              {isSelected && <FaCheckCircle className={colors.icon} />}
+            </div>
           </div>
-          <input type="checkbox" checked={isSelected} onChange={() => {}} className="w-5 h-5" />
         </div>
-        <p className="text-sm text-gray-600 dark:text-gray-400">{server.config.name}</p>
-        <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">{server.config.host}</p>
+
+        {showUIOptions && isSelected && (
+          <div className="ml-8 space-y-2 p-4 bg-gray-50 dark:bg-gray-700 rounded-lg border border-gray-200 dark:border-gray-600">
+            <p className="text-sm font-semibold text-gray-700 dark:text-gray-300 mb-2">Select UI Type(s):</p>
+            
+            <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded">
+              <input
+                type="checkbox"
+                checked={uiTypes.oldUI}
+                onChange={() => onUITypeToggle('oldUI')}
+                className="w-5 h-5 text-green-500 border-gray-300 rounded focus:ring-green-500"
+              />
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-green-500 rounded-full"></div>
+                <span className="text-gray-900 dark:text-white font-medium">Old UI</span>
+              </div>
+            </label>
+
+            <label className="flex items-center space-x-3 cursor-pointer hover:bg-gray-100 dark:hover:bg-gray-600 p-2 rounded">
+              <input
+                type="checkbox"
+                checked={uiTypes.newUI}
+                onChange={() => onUITypeToggle('newUI')}
+                className="w-5 h-5 text-orange-500 border-gray-300 rounded focus:ring-orange-500"
+              />
+              <div className="flex items-center space-x-2">
+                <div className="w-3 h-3 bg-orange-500 rounded-full"></div>
+                <span className="text-gray-900 dark:text-white font-medium">New UI</span>
+              </div>
+            </label>
+          </div>
+        )}
       </div>
     );
   };
@@ -598,6 +568,12 @@ const AutomatedUpgrade = () => {
         progress: 'bg-green-500',
         borderColor: 'border-green-200 dark:border-green-800'
       },
+      orange: { 
+        gradient: 'from-orange-500 to-orange-600', 
+        border: 'hover:border-orange-500 dark:hover:border-orange-400', 
+        progress: 'bg-orange-500',
+        borderColor: 'border-orange-200 dark:border-orange-800'
+      },
     };
     
     const colors = colorClasses[color];
@@ -611,7 +587,12 @@ const AutomatedUpgrade = () => {
               <h3 className="text-xl font-bold text-white">{label}</h3>
               {type === 'oldUI' && (
                 <p className="text-white text-opacity-90 text-sm mt-1">
-                  Same file will be deployed to all selected frontend servers
+                  Will be deployed to selected Old UI servers
+                </p>
+              )}
+              {type === 'newUI' && (
+                <p className="text-white text-opacity-90 text-sm mt-1">
+                  Will be deployed to FE1 (New UI)
                 </p>
               )}
             </div>
@@ -656,7 +637,6 @@ const AutomatedUpgrade = () => {
 
   return (
     <div className="min-h-screen bg-gradient-to-br from-gray-50 to-gray-100 dark:from-gray-900 dark:to-gray-800 p-6">
-      {/* Header */}
       <div className="max-w-7xl mx-auto mb-8">
         <div className="flex items-center justify-between">
           <div className="flex items-center space-x-4">
@@ -678,7 +658,6 @@ const AutomatedUpgrade = () => {
       </div>
 
       <div className="max-w-7xl mx-auto space-y-6">
-        {/* Server Group Selection */}
         <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6">
           <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Select Server Group</h2>
           
@@ -702,80 +681,44 @@ const AutomatedUpgrade = () => {
           )}
         </div>
 
-        {/* Server Selection with Adaptive Grid */}
         {selectedGroup && (
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
               Select Servers in {selectedGroup.toUpperCase()}
             </h2>
             
-            {(() => {
-              const availableServers = [
-                servers.backend ? { type: 'backend', config: servers.backend, label: 'Backend', color: 'blue' } : null,
-                servers.fe1 ? { type: 'fe1', config: servers.fe1, label: 'Frontend 1', color: 'green' } : null,
-                servers.fe2 ? { type: 'fe2', config: servers.fe2, label: 'Frontend 2', color: 'purple' } : null,
-              ].filter(Boolean);
-              
-              const serverCount = availableServers.length;
-              
-              return (
-                <div className={getAdaptiveGridClass(serverCount)}>
-                  {availableServers.map((server, index) => {
-                    if (!shouldRenderItem(index, serverCount)) return null;
-                    
-                    const wrapperClass = getItemWrapperClass(index, serverCount);
-                    const isSelected = selectedServers[server.type];
-                    
-                    // For 5 items: render items 4 and 5 together
-                    if (serverCount === 5 && index === 3) {
-                      const server4 = availableServers[3];
-                      const server5 = availableServers[4];
-                      
-                      return (
-                        <div key="row2" className={wrapperClass}>
-                          <ServerCard 
-                            server={server4} 
-                            isSelected={selectedServers[server4.type]} 
-                            onToggle={handleServerToggle} 
-                          />
-                          <ServerCard 
-                            server={server5} 
-                            isSelected={selectedServers[server5.type]} 
-                            onToggle={handleServerToggle} 
-                          />
-                        </div>
-                      );
-                    }
-                    
-                    // For 4 items: center the 4th item
-                    if (serverCount === 4 && index === 3) {
-                      return (
-                        <div key={server.type} className={wrapperClass}>
-                          <div className="max-w-md w-full">
-                            <ServerCard 
-                              server={server} 
-                              isSelected={isSelected} 
-                              onToggle={handleServerToggle} 
-                            />
-                          </div>
-                        </div>
-                      );
-                    }
-                    
-                    // Normal rendering (1, 2, 3 items or first 3 of 4+ items)
-                    return (
-                      <div key={server.type} className={wrapperClass}>
-                        <ServerCard 
-                          server={server} 
-                          isSelected={isSelected} 
-                          onToggle={handleServerToggle} 
-                        />
-                      </div>
-                    );
-                  })}
-                </div>
-              );
-            })()}
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              {servers.backend && (
+                <ServerCard 
+                  server={{ type: 'backend', config: servers.backend, label: 'Backend', color: 'blue' }}
+                  isSelected={selectedServers.backend} 
+                  onToggle={handleServerToggle}
+                  showUIOptions={false}
+                  uiTypes={{}}
+                  onUITypeToggle={() => {}}
+                />
+              )}
+              {servers.fe1 && (
+                <ServerCard 
+                  server={{ type: 'fe1', config: servers.fe1, label: 'Frontend 1', color: 'green' }}
+                  isSelected={selectedServers.fe1} 
+                  onToggle={handleServerToggle}
+                  showUIOptions={true}
+                  uiTypes={fe1UITypes}
+                  onUITypeToggle={handleFE1UITypeToggle}
+                />
+              )}
+              {servers.fe2 && (
+                <ServerCard 
+                  server={{ type: 'fe2', config: servers.fe2, label: 'Frontend 2', color: 'purple' }}
+                  isSelected={selectedServers.fe2} 
+                  onToggle={handleServerToggle}
+                  showUIOptions={false}
+                  uiTypes={{}}
+                  onUITypeToggle={() => {}}
+                />
+              )}
+            </div>
 
             {getSelectedServersCount() > 0 && (
               <div className="mt-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
@@ -787,46 +730,56 @@ const AutomatedUpgrade = () => {
           </div>
         )}
 
-        {/* File Upload Section with Adaptive Grid */}
         {selectedGroup && getSelectedServersCount() > 0 && (
           <div ref={fileUploadRef} className="bg-white dark:bg-gray-800 rounded-2xl shadow-xl p-6">
             <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">Upload Files</h2>
             
-            {(() => {
-              const uploadBoxes = [
-                selectedServers.backend ? { type: 'backend', label: 'Backend', color: 'blue' } : null,
-                (selectedServers.fe1 || selectedServers.fe2) ? { 
-                  type: 'oldUI', 
-                  label: `Old UI (${selectedServers.fe1 && selectedServers.fe2 ? 'FE1+FE2' : selectedServers.fe1 ? 'FE1' : 'FE2'})`,
-                  color: 'green'
-                } : null,
-              ].filter(Boolean);
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+              {selectedServers.backend && (
+                <FileUploadBox 
+                  type="backend"
+                  label="Backend"
+                  color="blue"
+                  file={files.backend}
+                  progress={uploadProgress.backend}
+                  uploading={uploadingFile === 'backend'}
+                  onSelect={(e) => handleFileSelect('backend', e)}
+                  onRemove={() => handleRemoveFile('backend')}
+                />
+              )}
               
-              const boxCount = uploadBoxes.length;
+              {((selectedServers.fe1 && fe1UITypes.oldUI) || selectedServers.fe2) && (
+                <FileUploadBox 
+                  type="oldUI"
+                  label={`Old UI (${[
+                    selectedServers.fe1 && fe1UITypes.oldUI ? 'FE1' : null,
+                    selectedServers.fe2 ? 'FE2' : null
+                  ].filter(Boolean).join(' + ')})`}
+                  color="green"
+                  file={files.oldUI}
+                  progress={uploadProgress.oldUI}
+                  uploading={uploadingFile === 'oldUI'}
+                  onSelect={(e) => handleFileSelect('oldUI', e)}
+                  onRemove={() => handleRemoveFile('oldUI')}
+                />
+              )}
               
-              return (
-                <div className={boxCount === 1 ? 'flex justify-center' : 'grid grid-cols-1 md:grid-cols-2 gap-6'}>
-                  {uploadBoxes.map((box) => (
-                    <FileUploadBox 
-                      key={box.type}
-                      type={box.type}
-                      label={box.label}
-                      color={box.color}
-                      file={files[box.type]}
-                      progress={uploadProgress[box.type]}
-                      uploading={uploadingFile === box.type}
-                      onSelect={(e) => handleFileSelect(box.type, e)}
-                      onRemove={() => handleRemoveFile(box.type)}
-                      className={boxCount === 1 ? 'max-w-md w-full' : ''}
-                    />
-                  ))}
-                </div>
-              );
-            })()}
+              {selectedServers.fe1 && fe1UITypes.newUI && (
+                <FileUploadBox 
+                  type="newUI"
+                  label="New UI (FE1)"
+                  color="orange"
+                  file={files.newUI}
+                  progress={uploadProgress.newUI}
+                  uploading={uploadingFile === 'newUI'}
+                  onSelect={(e) => handleFileSelect('newUI', e)}
+                  onRemove={() => handleRemoveFile('newUI')}
+                />
+              )}
+            </div>
           </div>
         )}
 
-        {/* Action Buttons */}
         {selectedGroup && getSelectedServersCount() > 0 && (
           <div className="flex justify-end space-x-4">
             <button
@@ -860,7 +813,6 @@ const AutomatedUpgrade = () => {
           </div>
         )}
 
-        {/* Error Display */}
         {error && (
           <div className="bg-red-100 dark:bg-red-900/30 border border-red-400 dark:border-red-600 rounded-xl p-4">
             <div className="flex items-center space-x-3">
@@ -870,79 +822,90 @@ const AutomatedUpgrade = () => {
           </div>
         )}
 
-        {/* DevOps Infinity Loop Status Banner */}
         {upgrading && (
           <div ref={spinnerRef} className="bg-gradient-to-r from-blue-500 to-blue-600 rounded-2xl shadow-2xl p-8">
-            <div className="flex items-center justify-center space-x-8">
-              {/* Infinity Loop Animation */}
+            <div className="flex items-center justify-center space-x-8 mb-6">
               <div className="relative w-32 h-20">
-                {/* SVG Infinity Symbol */}
                 <svg className="absolute inset-0 w-full h-full" viewBox="0 0 100 50" xmlns="http://www.w3.org/2000/svg">
-                  {/* Infinity path */}
                   <path
-                    d="M 10,25 C 10,15 15,10 25,10 C 35,10 40,15 50,25 C 60,35 65,40 75,40 C 85,40 90,35 90,25 C 90,15 85,10 75,10 C 65,10 60,15 50,25 C 40,35 35,40 25,40 C 15,40 10,35 10,25 Z"
+                    d="M 20,25 C 20,15 30,15 35,20 C 40,25 45,30 50,25 C 55,20 60,15 65,20 C 70,25 80,25 80,25 C 80,35 70,35 65,30 C 60,25 55,20 50,25 C 45,30 40,35 35,30 C 30,25 20,25 20,25 Z"
                     fill="none"
-                    stroke="white"
+                    stroke="rgba(255,255,255,0.3)"
                     strokeWidth="3"
-                    opacity="0.6"
                   />
-                  {/* Animated dot traveling on the path */}
-                  <circle r="4" fill="#FFA500">
+                  <circle r="4" fill="white">
                     <animateMotion
                       dur="3s"
                       repeatCount="indefinite"
-                      path="M 10,25 C 10,15 15,10 25,10 C 35,10 40,15 50,25 C 60,35 65,40 75,40 C 85,40 90,35 90,25 C 90,15 85,10 75,10 C 65,10 60,15 50,25 C 40,35 35,40 25,40 C 15,40 10,35 10,25 Z"
-                    />
-                  </circle>
-                  {/* Glow effect on the dot */}
-                  <circle r="6" fill="#FFA500" opacity="0.3">
-                    <animateMotion
-                      dur="3s"
-                      repeatCount="indefinite"
-                      path="M 10,25 C 10,15 15,10 25,10 C 35,10 40,15 50,25 C 60,35 65,40 75,40 C 85,40 90,35 90,25 C 90,15 85,10 75,10 C 65,10 60,15 50,25 C 40,35 35,40 25,40 C 15,40 10,35 10,25 Z"
+                      path="M 20,25 C 20,15 30,15 35,20 C 40,25 45,30 50,25 C 55,20 60,15 65,20 C 70,25 80,25 80,25 C 80,35 70,35 65,30 C 60,25 55,20 50,25 C 45,30 40,35 35,30 C 30,25 20,25 20,25 Z"
                     />
                   </circle>
                 </svg>
-                {/* Rocket icon in center */}
-                <div className="absolute inset-0 flex items-center justify-center">
-                  <FaRocket className="text-white text-xl opacity-90" />
-                </div>
               </div>
-              
-              <div className="text-center">
-                <h3 className="text-3xl font-bold text-white mb-2">Upgrade in Progress</h3>
-                <p className="text-white text-opacity-90 text-lg">
-                  Deploying to {getSelectedServersNames()}
+
+              <div className="flex-1">
+                <h3 className="text-2xl font-bold text-white mb-2">Upgrade in Progress</h3>
+                <p className="text-white text-opacity-90">
+                  {currentPhase ? `Phase ${currentPhase.phase}: ${currentPhase.name}` : 'Initializing...'}
                 </p>
-                <p className="text-white text-opacity-75 text-sm mt-2">
-                  This may take several minutes. Please do not close this window.
-                </p>
+                {allPhases.length > 0 && (
+                  <div className="mt-2">
+                    <span className="text-sm text-white text-opacity-90">
+                      {allPhases.filter(p => p.status === 'completed').length} of {allPhases.length} phases completed
+                    </span>
+                  </div>
+                )}
               </div>
             </div>
+
+            {allPhases.length > 0 && (
+              <div className="space-y-2 max-h-96 overflow-y-auto">
+                {allPhases.map((phase, index) => (
+                  <div key={index} className="flex items-center space-x-3 p-3 bg-white bg-opacity-10 rounded-lg">
+                    <div className="flex-shrink-0">
+                      {phase.status === 'completed' && <FaCheckCircle className="text-green-400 text-xl" />}
+                      {phase.status === 'running' && <FaSpinner className="text-yellow-400 text-xl animate-spin" />}
+                      {phase.status === 'error' && <FaTimesCircle className="text-red-400 text-xl" />}
+                      {phase.status === 'pending' && <FaClock className="text-gray-400 text-xl" />}
+                    </div>
+                    <div className="flex-1">
+                      <div className="flex items-center justify-between">
+                        <span className="text-white font-semibold">
+                          Phase {phase.phase}: {phase.name}
+                        </span>
+                        {phase.duration && (
+                          <span className="text-white text-opacity-75 text-sm">{phase.duration}</span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* Confirmation Modal */}
       {showConfirmModal && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-md w-full p-6">
             <div className="flex items-center space-x-3 mb-4">
-              <FaExclamationTriangle className="text-yellow-500 text-3xl" />
+              <FaExclamationTriangle className="text-orange-500 text-3xl" />
               <h3 className="text-2xl font-bold text-gray-900 dark:text-white">Confirm Upgrade</h3>
             </div>
             
-            <p className="text-gray-700 dark:text-gray-300 mb-4">
-              You are about to upgrade <strong>{getSelectedServersCount()}</strong> server(s) in <strong>{selectedGroup.toUpperCase()}</strong>:
+            <p className="text-gray-700 dark:text-gray-300 mb-2">
+              Are you sure you want to upgrade the following?
             </p>
             
-            <div className="bg-gray-100 dark:bg-gray-700 rounded-lg p-3 mb-6">
-              <p className="text-gray-800 dark:text-gray-200 font-semibold">{getSelectedServersNames()}</p>
+            <div className="bg-gray-50 dark:bg-gray-700 rounded-lg p-4 mb-6">
+              <p className="font-semibold text-gray-900 dark:text-white mb-2">
+                Server Group: {selectedGroup.toUpperCase()}
+              </p>
+              <p className="text-gray-700 dark:text-gray-300">
+                {getSelectedServersNames()}
+              </p>
             </div>
-
-            <p className="text-gray-700 dark:text-gray-300 mb-6">
-              This will stop services, deploy new files, and restart services. This process may take several minutes.
-            </p>
             
             <div className="flex justify-end space-x-3">
               <button
@@ -962,16 +925,10 @@ const AutomatedUpgrade = () => {
         </div>
       )}
 
-      {/* Completion Modal - SIMPLIFIED */}
       {showCompletionModal && completionData && (
-        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
-          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-lg w-full overflow-hidden">
-            {/* Header */}
-            <div className={`p-6 ${
-              completionData.success
-                ? 'bg-gradient-to-r from-green-500 to-green-600'
-                : 'bg-gradient-to-r from-red-500 to-red-600'
-            }`}>
+        <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-50 p-4">
+          <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-2xl w-full max-h-[90vh] overflow-hidden">
+            <div className={`${completionData.success ? 'bg-gradient-to-r from-green-500 to-green-600' : 'bg-gradient-to-r from-red-500 to-red-600'} p-6`}>
               <div className="flex items-center space-x-4">
                 <div className="bg-white rounded-full p-3">
                   {completionData.success ? (
@@ -989,43 +946,56 @@ const AutomatedUpgrade = () => {
               </div>
             </div>
 
-            {/* Body - SIMPLIFIED */}
-            <div className="p-6">
+            <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
               {completionData.duration && (
-                <div className="mb-4 p-4 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
-                  <p className="text-blue-800 dark:text-blue-300 text-lg">
-                    <strong>Duration:</strong> {completionData.duration}
+                <div className="mb-4 p-3 bg-blue-100 dark:bg-blue-900/30 rounded-lg">
+                  <p className="text-blue-800 dark:text-blue-300">
+                    <strong>Total Duration:</strong> {completionData.duration}
                   </p>
                 </div>
               )}
 
-              <div className="p-4 bg-gray-50 dark:bg-gray-700 rounded-lg">
-                <p className="text-gray-900 dark:text-white font-semibold mb-2">Servers Upgraded:</p>
-                <p className="text-gray-700 dark:text-gray-300">{getSelectedServersNames()}</p>
-              </div>
+              {completionData.phases && completionData.phases.length > 0 && (
+                <div className="space-y-2">
+                  <h3 className="font-semibold text-gray-900 dark:text-white mb-2">Phases:</h3>
+                  {completionData.phases.map((phase, index) => (
+                    <div key={index} className="flex items-start space-x-3 p-3 bg-gray-50 dark:bg-gray-700 rounded-lg">
+                      <div className="flex-shrink-0 mt-1">
+                        {phase.status === 'completed' && <FaCheckCircle className="text-green-500" />}
+                        {phase.status === 'error' && <FaTimesCircle className="text-red-500" />}
+                        {phase.status === 'pending' && <FaClock className="text-gray-400" />}
+                      </div>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <span className="font-semibold text-gray-900 dark:text-white">
+                            Phase {phase.phase}: {phase.name}
+                          </span>
+                          {phase.duration && (
+                            <span className="text-gray-600 dark:text-gray-400 text-sm">{phase.duration}</span>
+                          )}
+                        </div>
+                        {phase.error && (
+                          <p className="text-red-600 dark:text-red-400 text-sm mt-1">{phase.error}</p>
+                        )}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
 
-            {/* Footer with AUTO-REFRESH */}
             <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 flex justify-end space-x-3">
-              {completionData.logFile && (
+              {completionData.success && (
                 <button
                   onClick={handleShowLogs}
                   className="px-6 py-2 bg-blue-500 hover:bg-blue-600 text-white rounded-lg font-semibold transition-colors"
                 >
-                  View Logs
+                  Show Logs
                 </button>
               )}
-              
               <button
-                onClick={() => {
-                  setShowCompletionModal(false);
-                  window.location.reload(); // AUTO-REFRESH PAGE
-                }}
-                className={`px-6 py-2 rounded-lg font-semibold transition-colors ${
-                  completionData.success
-                    ? 'bg-green-500 hover:bg-green-600 text-white'
-                    : 'bg-gray-600 hover:bg-gray-700 text-white'
-                }`}
+                onClick={() => setShowCompletionModal(false)}
+                className="px-6 py-2 bg-gray-600 hover:bg-gray-700 text-white rounded-lg font-semibold transition-colors"
               >
                 Close
               </button>
@@ -1034,11 +1004,9 @@ const AutomatedUpgrade = () => {
         </div>
       )}
 
-      {/* Logs Modal */}
       {showLogs && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-4xl w-full max-h-[90vh] overflow-hidden">
-            {/* Header */}
             <div className="bg-gradient-to-r from-blue-500 to-blue-600 p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
@@ -1066,7 +1034,6 @@ const AutomatedUpgrade = () => {
               </div>
             </div>
 
-            {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
               {loadingLogs ? (
                 <div className="flex items-center justify-center py-12">
@@ -1080,7 +1047,6 @@ const AutomatedUpgrade = () => {
               )}
             </div>
 
-            {/* Footer */}
             <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 flex justify-end">
               <button
                 onClick={() => {
@@ -1096,11 +1062,9 @@ const AutomatedUpgrade = () => {
         </div>
       )}
 
-      {/* Logs History Modal */}
       {showLogsHistory && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[60] p-4">
           <div className="bg-white dark:bg-gray-800 rounded-2xl shadow-2xl max-w-5xl w-full max-h-[90vh] overflow-hidden">
-            {/* Header */}
             <div className="bg-gradient-to-r from-purple-500 to-purple-600 p-6">
               <div className="flex items-center justify-between">
                 <div className="flex items-center space-x-4">
@@ -1123,7 +1087,6 @@ const AutomatedUpgrade = () => {
               </div>
             </div>
 
-            {/* Content */}
             <div className="p-6 overflow-y-auto max-h-[calc(90vh-200px)]">
               {loadingHistory ? (
                 <div className="flex items-center justify-center py-12">
@@ -1176,7 +1139,6 @@ const AutomatedUpgrade = () => {
               )}
             </div>
 
-            {/* Footer */}
             <div className="bg-gray-50 dark:bg-gray-900 px-6 py-4 flex justify-end">
               <button
                 onClick={() => setShowLogsHistory(false)}
@@ -1189,7 +1151,6 @@ const AutomatedUpgrade = () => {
         </div>
       )}
 
-      {/* Delete Confirmation Modal */}
       {showDeleteConfirm && (
         <div className="fixed inset-0 bg-black bg-opacity-60 flex items-center justify-center z-[70] p-4">
           <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl max-w-md w-full p-6">

@@ -98,7 +98,8 @@ class UpgradeService {
     const results = {
       backend: null,
       fe1: null,
-      fe2: null
+      fe2: null,
+      newUI: null
     };
 
     try {
@@ -118,9 +119,9 @@ class UpgradeService {
         }
       }
 
-      // Execute FE1 upgrade if selected
+      // Execute FE1 Old UI upgrade if selected
       if (selectedServers.fe1 && serverConfigs.fe1) {
-        await this.log(`\n--- FRONTEND 1 UPGRADE ---`);
+        await this.log(`\n--- FRONTEND 1 (OLD UI) UPGRADE ---`);
         try {
           results.fe1 = await this.executeSingleFrontendUpgrade(serverConfigs.fe1, s3Keys, upgradeKey);
           await this.log(`Frontend 1 upgrade completed successfully`);
@@ -130,14 +131,26 @@ class UpgradeService {
         }
       }
 
-      // Execute FE2 upgrade if selected
+      // Execute FE2 Old UI upgrade if selected
       if (selectedServers.fe2 && serverConfigs.fe2) {
-        await this.log(`\n--- FRONTEND 2 UPGRADE ---`);
+        await this.log(`\n--- FRONTEND 2 (OLD UI) UPGRADE ---`);
         try {
           results.fe2 = await this.executeSingleFrontendUpgrade(serverConfigs.fe2, s3Keys, upgradeKey);
           await this.log(`Frontend 2 upgrade completed successfully`);
         } catch (error) {
           await this.log(`Frontend 2 upgrade failed: ${error.message}`);
+          throw error;
+        }
+      }
+
+      // Execute New UI upgrade if selected (only on FE1)
+      if (selectedServers.newUI && serverConfigs.newUI) {
+        await this.log(`\n--- NEW UI UPGRADE ---`);
+        try {
+          results.newUI = await this.executeSingleNewUIUpgrade(serverConfigs.newUI, s3Keys, upgradeKey);
+          await this.log(`New UI upgrade completed successfully`);
+        } catch (error) {
+          await this.log(`New UI upgrade failed: ${error.message}`);
           throw error;
         }
       }
@@ -215,6 +228,7 @@ class UpgradeService {
     if (selectedServers.backend) parts.push('backend');
     if (selectedServers.fe1) parts.push('fe1');
     if (selectedServers.fe2) parts.push('fe2');
+    if (selectedServers.newUI) parts.push('newUI');
     return parts.join('_');
   }
 
@@ -361,6 +375,72 @@ class UpgradeService {
 
     } catch (error) {
       await this.log(`Frontend upgrade failed for ${serverConfig.name}: ${error.message}`);
+      throw error;
+    }
+  }
+
+  // ==========================================
+  // SINGLE NEW UI UPGRADE
+  // ==========================================
+
+  async executeSingleNewUIUpgrade(serverConfig, s3Keys, upgradeKey) {
+    try {
+      await this.log(`Starting New UI upgrade for: ${serverConfig.name}`);
+
+      // Phase 1: Download New UI from S3
+      await this.runPhase(1, `Download New UI from S3`, async () => {
+        return await this.newUIDownloadToServer(serverConfig, s3Keys.newUI);
+      });
+
+      // Phase 2: Unzip files
+      await this.runPhase(2, `Unzip Files`, async () => {
+        return await this.newUIUnzipOnServer(serverConfig);
+      });
+
+      // Phase 3: Find and rename folder
+      await this.runPhase(3, `Find and Rename Folder`, async () => {
+        return await this.newUIFindAndRenameOnServer(serverConfig);
+      });
+
+      // Phase 4: Copy config files
+      await this.runPhase(4, `Copy Config Files`, async () => {
+        return await this.newUICopyConfigOnServer(serverConfig);
+      });
+
+      // Phase 5: Stop IIS
+      await this.runPhase(5, `Stop IIS`, async () => {
+        return await this.newUIStopIISOnServer(serverConfig);
+      });
+
+      // Phase 6: Backup old version
+      await this.runPhase(6, `Backup Old Version`, async () => {
+        return await this.newUIBackupOnServer(serverConfig);
+      });
+
+      // Phase 7: Deploy new version
+      await this.runPhase(7, `Deploy New Version`, async () => {
+        return await this.newUIDeployOnServer(serverConfig);
+      });
+
+      // Phase 8: Start IIS
+      await this.runPhase(8, `Start IIS`, async () => {
+        return await this.newUIStartIISOnServer(serverConfig);
+      });
+
+      // Phase 9: Cleanup temp
+      await this.runPhase(9, `Cleanup Temp Folders`, async () => {
+        return await this.newUICleanupOnServer(serverConfig);
+      });
+
+      await this.log(`New UI upgrade completed: ${serverConfig.name}`);
+      
+      return {
+        success: true,
+        server: serverConfig.name
+      };
+
+    } catch (error) {
+      await this.log(`New UI upgrade failed for ${serverConfig.name}: ${error.message}`);
       throw error;
     }
   }
@@ -561,6 +641,73 @@ class UpgradeService {
 
   async oldUICleanupOnServer(serverConfig) {
     const scriptTemplate = await this.loadScript('oldUI_08-cleanup-temp.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  // ==========================================
+  // NEW UI-SPECIFIC PHASE METHODS
+  // ==========================================
+
+  async newUIDownloadToServer(serverConfig, newUIKey) {
+    const scriptTemplate = await this.loadScript('newUI_01-download-from-s3.ps1');
+    
+    const newUIUrl = await s3Service.getDownloadUrl(newUIKey);
+    
+    if (!newUIUrl) {
+      throw new Error('New UI S3 key not provided');
+    }
+    
+    const script = scriptTemplate.replace('{{NEW_UI_URL}}', newUIUrl);
+    
+    const result = await sshService.executeScript(serverConfig, script);
+    return result.trim();
+  }
+
+  async newUIUnzipOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_02-unzip-files.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUIFindAndRenameOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_03-find-and-rename.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUICopyConfigOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_04-copy-config-files.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUIStopIISOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_05-stop-iis.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUIBackupOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_06-backup-old-version.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUIDeployOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_07-deploy-new-version.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUIStartIISOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_08-start-iis.ps1');
+    const result = await sshService.executeScript(serverConfig, scriptTemplate);
+    return result.trim();
+  }
+
+  async newUICleanupOnServer(serverConfig) {
+    const scriptTemplate = await this.loadScript('newUI_09-cleanup-temp.ps1');
     const result = await sshService.executeScript(serverConfig, scriptTemplate);
     return result.trim();
   }

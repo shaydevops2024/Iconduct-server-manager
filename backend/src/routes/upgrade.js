@@ -203,6 +203,7 @@ router.post('/execute-multi', async (req, res) => {
       backend: selectedServers.backend && backendServer ? backendServer : null,
       fe1: selectedServers.fe1 && frontendServers[0] ? frontendServers[0] : null,
       fe2: selectedServers.fe2 && frontendServers[1] ? frontendServers[1] : null,
+      newUI: selectedServers.newUI && frontendServers[0] ? frontendServers[0] : null, // New UI is on FE1
     };
 
     // Validate that selected servers exist
@@ -224,6 +225,12 @@ router.post('/execute-multi', async (req, res) => {
         error: `Frontend server 2 not found in group: ${serverGroup}`
       });
     }
+    if (selectedServers.newUI && !serverConfigs.newUI) {
+      return res.status(404).json({
+        success: false,
+        error: `New UI server (FE1) not found in group: ${serverGroup}`
+      });
+    }
 
     // Validate required files are uploaded
     if (selectedServers.backend && !s3Keys.backend) {
@@ -237,6 +244,13 @@ router.post('/execute-multi', async (req, res) => {
       return res.status(400).json({
         success: false,
         error: 'Old UI S3 key is required for frontend upgrade'
+      });
+    }
+
+    if (selectedServers.newUI && !s3Keys.newUI) {
+      return res.status(400).json({
+        success: false,
+        error: 'New UI S3 key is required for New UI upgrade'
       });
     }
 
